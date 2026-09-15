@@ -31225,8 +31225,10 @@ pub enum Stroke<'a> {
     /// dab — `paint + (canvas − paint) · wet · mix`, pure paint over a
     /// transparent pixel — and Load (`0..=100`) is the dab's opacity,
     /// composited `source-over` like [`Stroke::Brush`] at Load times the
-    /// coverage. Photoshop's clean/dirty brush, its per-stroke reservoir
-    /// depletion, and Sample All Layers are documented scope cuts.
+    /// coverage — `canvas` is the pre-stroke composite of every visible
+    /// layer under [`Self::stroke_sampling`]'s own Sample All Layers, or
+    /// this layer alone otherwise. Photoshop's clean/dirty brush and its
+    /// per-stroke reservoir depletion remain documented scope cuts.
     Mixer {
         color: [u8; 3],
         wet: u8,
@@ -50422,6 +50424,47 @@ mod tests {
         doc.stroke_sampling(top, &[(2.5, 2.5)], 0.5, Stroke::SpotHeal, false)
             .unwrap();
         assert_eq!(dot_red(&doc), 0);
+        // Mixer Brush, full pickup (Wet 100, Mix 100), onto an empty top
+        // layer: alone the pre-stroke canvas is transparent (alpha 0), so
+        // the dab is pure black paint with nothing to pick up from;
+        // sampling all layers the pre-stroke composite is opaque white,
+        // picked up in full — black lifted the whole way to white.
+        let (mut doc, top) = setup(&empty);
+        doc.stroke_sampling(
+            top,
+            &[(2.5, 2.5)],
+            0.5,
+            Stroke::Mixer {
+                color: [0, 0, 0],
+                wet: 100,
+                load: 100,
+                mix: 100,
+            },
+            false,
+        )
+        .unwrap();
+        assert_eq!(
+            &doc.layers()[1].pixels[(2 * 5 + 2) * 4..(2 * 5 + 2) * 4 + 4],
+            &[0, 0, 0, 255]
+        );
+        let (mut doc, top) = setup(&empty);
+        doc.stroke_sampling(
+            top,
+            &[(2.5, 2.5)],
+            0.5,
+            Stroke::Mixer {
+                color: [0, 0, 0],
+                wet: 100,
+                load: 100,
+                mix: 100,
+            },
+            true,
+        )
+        .unwrap();
+        assert_eq!(
+            &doc.layers()[1].pixels[(2 * 5 + 2) * 4..(2 * 5 + 2) * 4 + 4],
+            &[255, 255, 255, 255]
+        );
         // The flag means nothing to a plain brush, and stroke is the flag off.
         let (mut doc, top) = setup(&dot_layer());
         doc.stroke(

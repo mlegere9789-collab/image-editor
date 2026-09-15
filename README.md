@@ -24535,6 +24535,46 @@ build`/`test`/`tsc --noEmit` all clean.
 Tests: 1958 Rust (1953 → 1958), 36 frontend (unchanged — one checkbox
 reused in two existing dialogs needs no new test file).
 
+## Phase 420 — Mixer Brush's Sample All Layers, a Stale Doc Fix
+
+MIXER BRUSH TOOL's own row still named Sample All Layers as a documented
+scope cut, alongside the clean/dirty brush and reservoir depletion — but
+checking the actual code against the same pattern that caught two
+earlier stale rows this project (Select and Mask's Edge Detection in
+Phase 412, Move Tool's Auto-Select in Phase 413) found it already fully
+shipped: `mixer_stroke`'s own Tauri command already calls
+`Document::stroke_sampling` — the exact shared mechanism Blur, Smudge,
+Clone Stamp, Healing Brush, and Spot Healing Brush all use for their own
+Sample All Layers, built in Phase 373 — and `Stroke::Mixer`'s own match
+arm in the stroke loop already reads the pre-stroke composite instead of
+this layer alone when the flag is set, exactly like Clone Stamp's own
+arm two cases above it. The frontend's shared "Sample All Layers"
+checkbox in the tools options bar already lists `mixerBrush` among the
+tools it shows for. Nothing here was ever missing; only the row's own
+text, and a matching stale line in `Stroke::Mixer`'s own doc comment,
+still claimed otherwise.
+
+Both are corrected in place. One new hand-computed case added to the
+existing `sample_all_layers_reads_the_composite_under_the_neighbourhood_tools`
+test (not a new test function — the established distinction this
+project has tracked test counts by since Phase 407) backs the correction
+with an actual, previously-unexercised path: a Mixer Brush stroke at Wet
+100/Mix 100 (full pickup) onto an empty top layer over an opaque white
+one. Sampling only its own transparent layer, the dab has nothing to
+pick up from and paints pure black; sampling all layers, the pre-stroke
+composite's opaque white is picked up in full, painting pure white
+instead — the same black-vs-white contrast the existing Clone Stamp and
+Blur cases in that test already use to make the difference unmistakable.
+Cross-checked by hand: `paint + (composite − paint) · (wet/100 · mix/100)`
+at `paint = 0`, `composite = 255`, pickup `1.0`, gives exactly `255`.
+All pre-existing `mixer_brush_*`/`sample_all_layers_*` tests still pass
+unmodified. `cargo fmt`/`clippy --all-targets -D warnings`/`test` and
+`npm run build`/`test`/`tsc --noEmit` all clean — no frontend change,
+the checkbox already there.
+
+Tests: 1958 Rust (unchanged — a new case inside an existing test, not a
+new `#[test]` function), 36 frontend (unchanged).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
