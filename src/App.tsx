@@ -2091,8 +2091,12 @@ export default function App() {
   const [bevelAltitude, setBevelAltitude] = useState(30);
   const [bevelHighlight, setBevelHighlight] = useState("#ffffff");
   const [bevelHighlightOpacity, setBevelHighlightOpacity] = useState(50);
+  const [bevelHighlightBlendMode, setBevelHighlightBlendMode] =
+    useState<BlendMode>("screen");
   const [bevelShadow, setBevelShadow] = useState("#000000");
   const [bevelShadowOpacity, setBevelShadowOpacity] = useState(50);
+  const [bevelShadowBlendMode, setBevelShadowBlendMode] =
+    useState<BlendMode>("multiply");
   const [showContourDialog, setShowContourDialog] = useState(false);
   const [contourSize, setContourSize] = useState(5);
   const [contourLightDirection, setContourLightDirection] = useState(7);
@@ -6417,8 +6421,10 @@ export default function App() {
         altitude: bevelAltitude,
         highlight: [hr, hg, hb],
         highlightOpacity: bevelHighlightOpacity,
+        highlightBlendMode: bevelHighlightBlendMode,
         shadow: [sr, sg, sb],
         shadowOpacity: bevelShadowOpacity,
+        shadowBlendMode: bevelShadowBlendMode,
       },
     });
     setShowBevelEmbossDialog(false);
@@ -6435,8 +6441,10 @@ export default function App() {
     bevelAltitude,
     bevelHighlight,
     bevelHighlightOpacity,
+    bevelHighlightBlendMode,
     bevelShadow,
     bevelShadowOpacity,
+    bevelShadowBlendMode,
   ]);
 
   const applyContour = useCallback(async () => {
@@ -26425,6 +26433,21 @@ export default function App() {
               <span className="control__value">{bevelHighlightOpacity}%</span>
             </label>
             <label className="control control--row">
+              <span className="control__label">Highlight Mode</span>
+              <select
+                value={bevelHighlightBlendMode}
+                onChange={(event) =>
+                  setBevelHighlightBlendMode(event.target.value as BlendMode)
+                }
+              >
+                {blendModes.map((info) => (
+                  <option key={info.mode} value={info.mode}>
+                    {info.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="control control--row">
               <span className="control__label">Shadow</span>
               <input
                 type="color"
@@ -26442,6 +26465,21 @@ export default function App() {
                 title="Shadow opacity"
               />
               <span className="control__value">{bevelShadowOpacity}%</span>
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Shadow Mode</span>
+              <select
+                value={bevelShadowBlendMode}
+                onChange={(event) =>
+                  setBevelShadowBlendMode(event.target.value as BlendMode)
+                }
+              >
+                {blendModes.map((info) => (
+                  <option key={info.mode} value={info.mode}>
+                    {info.label}
+                  </option>
+                ))}
+              </select>
             </label>
             <div className="modal__actions">
               <button

@@ -23269,6 +23269,63 @@ Tests: 1910 Rust (1908 → 1910), 33 frontend (unchanged — a dropdown
 value renamed and one slider added, no new test file needed since
 `fillLayerKind`/`currentFill` have no dedicated frontend test suite).
 
+## Phase 397 — Bevel & Emboss's Highlight and Shadow Blend Modes
+
+Bevel & Emboss's own "highlight and shadow blend modes remain documented
+scope cuts" line was the next largest-impact item in
+`docs/PLAN_TO_100.md`'s Phase D backlog. `BevelEmbossOptions` gained two
+new required fields, `highlight_blend_mode` and `shadow_blend_mode`
+(both `BlendMode`), rather than a new function — the options-struct shape
+Gradient Overlay's own Phase 392 already established for exactly this
+situation. Every one of the 16-odd existing call sites across this
+project's own test suite already builds a `BevelEmbossOptions` through
+`..bevel_options()` struct-update syntax against one shared helper, so
+adding the two fields there (both `BlendMode::Normal`, preserving every
+existing test's own behaviour) was the only call-site change needed;
+`cargo build`/`cargo test --no-run` confirmed no other construction site
+existed. The per-pixel mix — previously a flat linear interpolation
+toward the highlight or shadow colour by `relief × opacity` — now runs
+that colour through `blend_mode.blend(Cb, Cs)` first, the same narrowing
+Color Overlay, Gradient Overlay, Pattern Overlay, Satin, and Stroke
+already make; `BlendMode::Normal` collapses it back to the original
+formula exactly. The outer styles' own surround-painting branch (a
+transparent pixel taking the colour outright at `relief × opacity`
+alpha) is unaffected by blend mode either way — Screen or Multiply have
+nothing existing behind a transparent pixel to blend against, so
+Photoshop's own behaviour there is the same regardless of mode.
+`Document::bevel_emboss_with`'s Tauri command needed no changes — it
+already takes the whole options struct generically, so the two new
+fields reach it and the frontend for free, the same reason Phase 392's
+struct field needed none. The frontend's Bevel & Emboss dialog gained
+Highlight Mode and Shadow Mode dropdowns, defaulting to Photoshop's own
+real defaults — Screen and Multiply respectively — rather than Normal,
+since this is new UI state with no prior behaviour to preserve.
+
+**Verified.** All 11 pre-existing Bevel & Emboss tests pass unmodified in
+behaviour, including `contour_with_linear_reproduces_plain_bevel_emboss_exactly`'s
+own byte-for-byte cross-check against a fresh `bevel_emboss` call,
+proving zero regression end to end through Contour's own reuse of this
+same code path. One new hand-computed test,
+`bevel_emboss_with_multiply_blends_the_highlight_colour_first`, reuses
+`inner_glow_fixture`'s own left-edge full-relief case (own
+`[100, 150, 200]`) against a red `(255, 0, 0)` highlight at opacity 100
+through Multiply instead of white at 75 through Normal: Multiply's
+`B(Cb, Cs) = Cb · Cs` leaves R exactly as it started (100, red's own
+`Cs = 1.0`) while G and B both collapse to 0 (their own `Cs = 0`) — a
+real, contrasting result against Normal's own full-opacity behaviour,
+which replaces every channel outright (white's own `Cs = 1.0` on all
+three channels at once, as the pre-existing white-highlight test already
+shows). `cargo fmt`/`clippy --all-targets -D warnings`/`test` and
+`npm run build`/`test`/`tsc --noEmit` all clean.
+
+Tests: 1911 Rust (1910 → 1911), 33 frontend (unchanged — two dropdowns,
+same pattern as the prior five phases').
+
+This also closes out the Blend Mode narrowing across every layer style
+`docs/PHOTOSHOP_PARITY.md` had it as a documented scope cut for: Color
+Overlay, Gradient Overlay, Pattern Overlay, Satin, Stroke, and now Bevel
+& Emboss's own Highlight and Shadow Modes.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

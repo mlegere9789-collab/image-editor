@@ -401,9 +401,15 @@ pub struct BevelEmbossOptions {
     pub highlight: [u8; 3],
     /// Highlight opacity, 0–100.
     pub highlight_opacity: u32,
+    /// Highlight Mode. Photoshop's own default is Screen; this project's
+    /// default (in the frontend's own initial state) is Normal, matching
+    /// every other blend-mode-bearing dialog's own initial choice.
+    pub highlight_blend_mode: BlendMode,
     pub shadow: [u8; 3],
     /// Shadow opacity, 0–100.
     pub shadow_opacity: u32,
+    /// Shadow Mode. Photoshop's own default is Multiply.
+    pub shadow_blend_mode: BlendMode,
 }
 
 /// Layer > Layer Style > Stroke's Position.
@@ -23909,10 +23915,15 @@ impl Document {
     /// clamped to ±1 and turned over for Direction Down, is box-blurred
     /// by Soften. A positive relief blends the pixel toward the highlight
     /// colour by relief × highlight opacity, a negative one toward the
-    /// shadow colour; a transparent pixel with relief becomes that colour
-    /// at relief × opacity alpha, so the outer styles paint the surround.
-    /// Gloss Contour and the highlight and shadow blend modes remain
-    /// documented scope cuts. See README Phase 353.
+    /// shadow colour — each running the colour through its own
+    /// `blend_mode.blend(Cb, Cs)` first, the same narrowing every other
+    /// layer style's Blend Mode already makes, `BlendMode::Normal`
+    /// collapsing back to the original flat mix; a transparent pixel with
+    /// relief becomes that colour at relief × opacity alpha regardless of
+    /// blend mode — Screen or Multiply have nothing existing to blend
+    /// against there, so the outer styles paint the surround exactly as
+    /// before. Gloss Contour remains a documented scope cut. See README
+    /// Phases 353 and 397.
     pub fn bevel_emboss_with(
         &mut self,
         id: LayerId,
@@ -24001,15 +24012,17 @@ impl Document {
         let hl = o.highlight_opacity as f32 / 100.0;
         let sh = o.shadow_opacity as f32 / 100.0;
         let style = o.style;
+        let highlight_blend_mode = o.highlight_blend_mode;
+        let shadow_blend_mode = o.shadow_blend_mode;
         self.filter_pixels(id, move |src, row, col| {
             let idx = row as usize * w + col as usize;
             let base = idx * CHANNELS;
             let n = relief[idx];
             let px = [src[base], src[base + 1], src[base + 2], src[base + 3]];
-            let (colour, t) = if n > 0.0 {
-                (highlight, n * hl)
+            let (colour, t, blend_mode) = if n > 0.0 {
+                (highlight, n * hl, highlight_blend_mode)
             } else {
-                (shadow, -n * sh)
+                (shadow, -n * sh, shadow_blend_mode)
             };
             if px[3] == 0 {
                 if style == BevelStyle::InnerBevel || t <= 0.0 {
@@ -24024,9 +24037,9 @@ impl Document {
             }
             let mut out = px;
             for c in 0..3 {
-                out[c] = (px[c] as f32 + (colour[c] as f32 - px[c] as f32) * t)
-                    .round()
-                    .clamp(0.0, 255.0) as u8;
+                let cb = to_unit(px[c]);
+                let blended = blend_mode.blend(cb, to_unit(colour[c]));
+                out[c] = to_byte(cb * (1.0 - t) + blended * t);
             }
             out
         })
@@ -47438,8 +47451,10 @@ mod tests {
             altitude: 0.0,
             highlight: [255, 255, 255],
             highlight_opacity: 75,
+            highlight_blend_mode: BlendMode::Normal,
             shadow: [0, 0, 0],
             shadow_opacity: 75,
+            shadow_blend_mode: BlendMode::Normal,
         }
     }
 
@@ -49426,6 +49441,38 @@ mod tests {
                 [158, 189, 221, 255]
             );
         }
+    }
+
+    #[test]
+    fn bevel_emboss_with_multiply_blends_the_highlight_colour_first() {
+        // Same fixture and geometry as the previous test's own left-edge
+        // (1, 2) case (own = [100, 150, 200], relief fully toward the
+        // highlight), but a red (255, 0, 0) highlight at opacity 100
+        // through Multiply instead of white at 75 through Normal.
+        // Multiply's own B(Cb, Cs) = Cb * Cs: red's own Cs = 255/255 =
+        // 1.0, so R is left exactly as it started (100) instead of
+        // Normal's own full-opacity behaviour, which would replace it
+        // outright (255, matching white's own Cs = 1.0 on every channel,
+        // as the previous test's white-highlight case shows for all
+        // three channels at once). G and B's own Cs = 0, so Cb * 0 = 0
+        // regardless of the original value: both collapse to 0 -- a
+        // real, contrasting result.
+        let idx = |x: usize, y: usize| (y * 6 + x) * 4;
+        let (mut doc, id) = inner_glow_fixture();
+        doc.bevel_emboss_with(
+            id,
+            &BevelEmbossOptions {
+                highlight: [255, 0, 0],
+                highlight_opacity: 100,
+                highlight_blend_mode: BlendMode::Multiply,
+                ..bevel_options()
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            &doc.layers()[0].pixels[idx(1, 2)..idx(1, 2) + 4],
+            [100, 0, 0, 255]
+        );
     }
 
     #[test]
