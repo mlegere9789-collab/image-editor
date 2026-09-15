@@ -166,7 +166,8 @@ export type Fill =
       startColor: [number, number, number, number];
       endColor: [number, number, number, number];
     }
-  | { kind: "pattern" };
+  | { kind: "pattern" }
+  | { kind: "patternScaled"; scale: number };
 
 /** Mirrors `Adjustment` in src-tauri/src/document.rs (serde internally
  * tagged by `kind`). */

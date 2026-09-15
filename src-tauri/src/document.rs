@@ -3693,6 +3693,12 @@ pub enum Fill {
     /// The pattern Edit > Define Pattern captured, tiled from the top-left
     /// corner.
     Pattern,
+    /// [`Fill::Pattern`] with Photoshop's own Scale option: the pattern
+    /// tile resized by `scale` percent (nearest-neighbour) before tiling
+    /// from the top-left corner. A new variant rather than a field added
+    /// to [`Fill::Pattern`] itself, since that unit variant is already
+    /// matched bare at several call sites this project's own tests use.
+    PatternScaled { scale: u32 },
 }
 
 /// One pixel's RGB through `adjustment` — byte for byte the formula the
@@ -10120,6 +10126,28 @@ impl Document {
                 for y in 0..self.height as usize {
                     for x in 0..self.width as usize {
                         let src = ((y % ph) * pw + (x % pw)) * CHANNELS;
+                        let dst = (y * self.width as usize + x) * CHANNELS;
+                        pixels[dst..dst + CHANNELS]
+                            .copy_from_slice(&pattern.pixels[src..src + CHANNELS]);
+                    }
+                }
+            }
+            Fill::PatternScaled { scale } => {
+                if !(10..=400).contains(&scale) {
+                    return Err("Pattern Fill scale must be between 10 and 400.".to_string());
+                }
+                let pattern = self.pattern.as_ref().ok_or_else(|| {
+                    "No pattern has been defined yet (Edit > Define Pattern).".to_string()
+                })?;
+                let (pw, ph) = (pattern.width as usize, pattern.height as usize);
+                let factor = scale as f32 / 100.0;
+                let tile_w = ((pw as f32 * factor).round() as usize).max(1);
+                let tile_h = ((ph as f32 * factor).round() as usize).max(1);
+                for y in 0..self.height as usize {
+                    for x in 0..self.width as usize {
+                        let src_x = (((x % tile_w) as f32 / factor) as usize).min(pw - 1);
+                        let src_y = (((y % tile_h) as f32 / factor) as usize).min(ph - 1);
+                        let src = (src_y * pw + src_x) * CHANNELS;
                         let dst = (y * self.width as usize + x) * CHANNELS;
                         pixels[dst..dst + CHANNELS]
                             .copy_from_slice(&pattern.pixels[src..src + CHANNELS]);
@@ -42527,6 +42555,67 @@ mod tests {
             assert_eq!(pixel(&doc, id, 3, y)[0], 2);
         }
         assert_eq!(doc.view().layers[1].fill, Some(Fill::Pattern));
+    }
+
+    #[test]
+    fn fill_pattern_scaled_at_100_percent_is_exactly_fill_pattern() {
+        // Same 4x2 canvas and 2x1 (1, 2) pattern tile as
+        // a_pattern_fill_layer_needs_a_pattern_and_tiles_it.
+        let mut doc = Document::new(4, 2).unwrap();
+        #[rustfmt::skip]
+        let pixels = [
+            1, 0, 0, 255,  2, 0, 0, 255,  3, 0, 0, 255,  4, 0, 0, 255,
+            5, 0, 0, 255,  6, 0, 0, 255,  7, 0, 0, 255,  8, 0, 0, 255,
+        ];
+        let base = doc.add_layer("base", &pixels, 4, 2).unwrap();
+        doc.select_rectangle(0.0, 0.0, 2.0, 1.0).unwrap();
+        doc.define_pattern(base).unwrap();
+        doc.deselect();
+        let plain = doc.add_fill_layer("plain", Fill::Pattern).unwrap();
+        let scaled = doc
+            .add_fill_layer("scaled", Fill::PatternScaled { scale: 100 })
+            .unwrap();
+        assert_eq!(pixel(&doc, plain, 0, 0), pixel(&doc, scaled, 0, 0));
+        assert_eq!(pixel(&doc, plain, 0, 0)[0], 1);
+        for x in 0..4 {
+            for y in 0..2 {
+                assert_eq!(pixel(&doc, plain, x, y), pixel(&doc, scaled, x, y));
+            }
+        }
+    }
+
+    #[test]
+    fn fill_pattern_scaled_stretches_the_tile_before_repeating() {
+        // Same fixture: a 2x1 tile reading (1, 2). At 200% the tile grows
+        // to 4x1 -- exactly the canvas width -- so each source column is
+        // stretched across two destination columns before the (now
+        // pointless, canvas-width-sized) repeat: 0 -> 1, 1 -> 1, 2 -> 2,
+        // 3 -> 2, in contrast with Fill::Pattern's own unscaled 1, 2, 1, 2.
+        let mut doc = Document::new(4, 2).unwrap();
+        #[rustfmt::skip]
+        let pixels = [
+            1, 0, 0, 255,  2, 0, 0, 255,  3, 0, 0, 255,  4, 0, 0, 255,
+            5, 0, 0, 255,  6, 0, 0, 255,  7, 0, 0, 255,  8, 0, 0, 255,
+        ];
+        let base = doc.add_layer("base", &pixels, 4, 2).unwrap();
+        doc.select_rectangle(0.0, 0.0, 2.0, 1.0).unwrap();
+        doc.define_pattern(base).unwrap();
+        doc.deselect();
+        let id = doc
+            .add_fill_layer("p", Fill::PatternScaled { scale: 200 })
+            .unwrap();
+        for y in 0..2 {
+            assert_eq!(pixel(&doc, id, 0, y)[0], 1);
+            assert_eq!(pixel(&doc, id, 1, y)[0], 1);
+            assert_eq!(pixel(&doc, id, 2, y)[0], 2);
+            assert_eq!(pixel(&doc, id, 3, y)[0], 2);
+        }
+        assert!(doc
+            .add_fill_layer("bad", Fill::PatternScaled { scale: 9 })
+            .is_err());
+        assert!(doc
+            .add_fill_layer("bad2", Fill::PatternScaled { scale: 401 })
+            .is_err());
     }
 
     #[test]

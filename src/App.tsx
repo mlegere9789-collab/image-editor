@@ -2149,6 +2149,7 @@ export default function App() {
   const [showFillLayerDialog, setShowFillLayerDialog] = useState(false);
   const [fillLayerKind, setFillLayerKind] =
     useState<Fill["kind"]>("solidColor");
+  const [fillPatternScale, setFillPatternScale] = useState(100);
   // The Type tools: a text layer's type, new or edited.
   const [showTypeDialog, setShowTypeDialog] = useState(false);
   const [typeText, setTypeText] = useState("Type");
@@ -6603,9 +6604,9 @@ export default function App() {
         };
       }
       default:
-        return { kind: "pattern" };
+        return { kind: "patternScaled", scale: fillPatternScale };
     }
-  }, [fillLayerKind, brushColor, gradientEndColor]);
+  }, [fillLayerKind, brushColor, gradientEndColor, fillPatternScale]);
 
   const addFillLayer = useCallback(async () => {
     const fill = currentFill();
@@ -27427,10 +27428,12 @@ export default function App() {
                 <option value="gradient">
                   Gradient (brush → gradient end colour)
                 </option>
-                <option value="pattern">Pattern (the defined pattern)</option>
+                <option value="patternScaled">
+                  Pattern (the defined pattern)
+                </option>
               </select>
             </label>
-            {fillLayerKind !== "pattern" && (
+            {fillLayerKind !== "patternScaled" && (
               <label className="control">
                 <span className="control__label">
                   {fillLayerKind === "gradient" ? "Start" : "Color"}
@@ -27452,7 +27455,24 @@ export default function App() {
                 />
               </label>
             )}
-            {fillLayerKind === "pattern" && !document?.hasPattern && (
+            {fillLayerKind === "patternScaled" && (
+              <label className="control">
+                <span className="control__label">
+                  Scale
+                  <span className="control__value">{fillPatternScale}%</span>
+                </span>
+                <input
+                  type="range"
+                  min={10}
+                  max={400}
+                  value={fillPatternScale}
+                  onChange={(event) =>
+                    setFillPatternScale(Number(event.target.value))
+                  }
+                />
+              </label>
+            )}
+            {fillLayerKind === "patternScaled" && !document?.hasPattern && (
               <p className="modal__hint">
                 No pattern is defined yet (Edit &gt; Define Pattern).
               </p>
@@ -27478,7 +27498,8 @@ export default function App() {
                 className="button"
                 onClick={addFillLayer}
                 disabled={
-                  busy || (fillLayerKind === "pattern" && !document?.hasPattern)
+                  busy ||
+                  (fillLayerKind === "patternScaled" && !document?.hasPattern)
                 }
               >
                 Add Layer

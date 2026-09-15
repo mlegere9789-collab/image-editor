@@ -23227,6 +23227,48 @@ the colour outright. `cargo fmt`/`clippy --all-targets -D warnings`/
 Tests: 1908 Rust (1907 → 1908), 33 frontend (unchanged — one dropdown,
 same pattern as the prior four phases').
 
+## Phase 396 — Fill Layer's Pattern Scale
+
+Fill Layer's own "pattern scale options remain documented scope cuts"
+line was the next largest-impact item in `docs/PLAN_TO_100.md`'s Phase D
+backlog: Photoshop's Pattern Fill dialog always shows a Scale option, and
+this project's own `Fill::Pattern` variant had none. Rather than adding a
+`scale` field to `Fill::Pattern` itself — a unit variant several existing
+tests already match bare (`Fill::Pattern` with no braces) — this adds a
+new sibling variant, `Fill::PatternScaled { scale: u32 }`, the same
+new-variant-instead-of-widened-shape choice this project's own functions
+make when many callers already pattern-match the old shape exactly.
+`render_fill`'s new arm resizes the pattern tile by `scale` percent
+(nearest-neighbour, `10..=400`) before tiling from the top-left corner,
+same as `Fill::Pattern` always has; at `scale: 100` the resized tile is
+pixel-identical to the original, so `PatternScaled` is a strict
+superset. `Document::add_fill_layer`/`set_fill` needed no changes at
+all — both already take `Fill` generically, so the new variant reaches
+them, and the Tauri layer, for free (the same reason Gradient Overlay's
+Phase 392 could add a struct field with no command-signature change).
+The frontend's Fill Layer dialog now always sends `patternScaled`
+(dropping the old unscaled `pattern` variant from the UI, though
+`Fill::Pattern` itself is untouched and still directly constructible),
+with a new Scale slider shown alongside the existing "no pattern
+defined" hint.
+
+**Verified.** Two new hand-computed tests reusing
+`a_pattern_fill_layer_needs_a_pattern_and_tiles_it`'s own fixture (a 4×2
+canvas, a 2×1 pattern tile reading `1, 2` in its own red channel):
+`fill_pattern_scaled_at_100_percent_is_exactly_fill_pattern` compares
+`Fill::Pattern` and `Fill::PatternScaled { scale: 100 }` pixel-for-pixel
+across the whole 4×2 canvas — identical, as designed.
+`fill_pattern_scaled_stretches_the_tile_before_repeating` doubles the
+tile to 200% (4×1, exactly the canvas width): the row reads `1, 1, 2, 2`
+in contrast with `Fill::Pattern`'s own unscaled `1, 2, 1, 2` — a real,
+visible difference — plus two range-validation cases (9% and 401%, both
+refused). `cargo fmt`/`clippy --all-targets -D warnings`/`test` and
+`npm run build`/`test`/`tsc --noEmit` all clean.
+
+Tests: 1910 Rust (1908 → 1910), 33 frontend (unchanged — a dropdown
+value renamed and one slider added, no new test file needed since
+`fillLayerKind`/`currentFill` have no dedicated frontend test suite).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
