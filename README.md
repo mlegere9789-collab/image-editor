@@ -24138,6 +24138,78 @@ transparent layers alone still error. `cargo fmt`/`clippy --all-targets
 Tests: 1931 Rust (1928 → 1931), 36 frontend (unchanged — six buttons
 reusing Group Layers' own id-gathering pattern need no new test file).
 
+## Phase 414 — Rectangle and Ellipse Tools' Center and Outside Stroke Position
+
+RECTANGLE TOOL's and ELLIPSE TOOL's own rows both named the same
+documented scope cut for their Pixels-mode stroke: Photoshop's own
+Inside/Center/Outside stroke alignment, hard-coded to Inside since
+whichever phase first built `draw_rectangle`/`draw_ellipse`. This phase
+lifts that cut for both tools together, since they already share one
+private painter.
+
+Photoshop's Stroke Position was already a modeled concept in this
+project — `StrokePosition` (`Outside`/`Inside`/`Center`), built for Layer
+Style > Stroke's own Position dropdown — so this phase reuses that exact
+enum rather than defining a second one for the same idea. A new
+`grow_rect(bounds, width, canvas_width, canvas_height)` is `shrink_rect`'s
+inverse: it grows a rect outward by `width` on every side and clamps the
+result to the canvas edges, the same way `shrink_rect` already clamps
+inward. The private `draw_shape` painter, shared by both tools, gained a
+`position: StrokePosition` parameter and now computes an `(outer, inner)`
+silhouette pair per position instead of always using `(bounds,
+shrink_rect(bounds, width))`: Inside keeps that exact pair; Outside grows
+the outer edge to `grow_rect(bounds, width, ...)` and leaves the inner
+edge at `bounds`; Center splits the width across both edges with Rust's
+own truncating division (`width / 2` inward, the remainder outward), so
+an odd width truncates toward the inside — Photoshop's own rounding rule
+for a straddling stroke. Everything between `outer` and `inner` still
+paints via the same pixel-centre `shape_contains` rule already shared by
+every shape tool.
+
+Two new public siblings, `draw_rectangle_with`/`draw_ellipse_with`, carry
+the new `position` parameter; the original `draw_rectangle`/`draw_ellipse`
+(36 call sites across the codebase, mostly existing tests) are completely
+unchanged and now simply delegate to the new siblings with
+`StrokePosition::Inside` baked in — the same
+plain-function-delegates-to-`_with`-sibling shape used for Hue/Saturation,
+Selective Color, and Pattern Fill's own angle in earlier phases. The
+`draw_rectangle`/`draw_ellipse` Tauri commands gained an
+`Option<StrokePosition>` parameter defaulting to Inside; the frontend adds
+one "Position" dropdown (Inside/Center/Outside) to the Rectangle/Ellipse
+tools' own options bar, next to the existing stroke width slider and
+color swatch, disabled whenever the stroke width is 0.
+
+**Verified two ways.** Five new hand-computed tests on a document with a
+10×10 canvas and a 4×4..6×6 (2px-wide) box:
+`draw_rectangle_with_outside_stroke_grows_the_ring_beyond_the_box` — a
+2px Outside stroke on that box paints a ring from `(2,2)` to `(7,7)` with
+the fill untouched inside `bounds`, the stroke never touching row/col 1 or
+8 since the box itself sits one pixel in from where a full-width Outside
+growth would land.
+`draw_rectangle_with_center_stroke_straddles_the_edge` — a 2px Center
+stroke splits 1px in / 1px out, landing the ring on `(3,3)`..`(6,6)`,
+exactly one pixel wider on every side than the Inside case and one
+narrower than the Outside case, cross-checked pixel-by-pixel against both.
+`draw_rectangle_with_center_stroke_truncates_an_odd_width_toward_the_inside`
+— a 3px Center stroke splits `3/2=1` px outward, `3-1=2` px inward
+(Rust's truncating division), verified against an independent Python port
+of the same `width/2`/`width-width/2` split.
+`draw_rectangle_with_outside_stroke_clamps_to_the_canvas_edge` — a box
+touching the canvas edge with an Outside stroke wider than the remaining
+margin clamps to row/col 0 rather than going negative, matching
+`grow_rect`'s own clamping contract.
+`draw_ellipse_with_position_defaults_to_inside_and_is_pixel_identical` —
+`draw_ellipse_with(..., StrokePosition::Inside)` produces a byte-for-byte
+identical canvas to the pre-existing plain `draw_ellipse` on the same
+inputs, proving the new code path is a strict superset of the old one.
+All 10 pre-existing `rectangle_tool_*`/`ellipse_tool_*` tests still pass
+unmodified, confirming zero regression on the default Inside behavior.
+`cargo fmt`/`clippy --all-targets -D warnings`/`test` and `npm run
+build`/`test`/`tsc --noEmit` all clean.
+
+Tests: 1936 Rust (1931 → 1936), 36 frontend (unchanged — a dropdown wired
+into the existing shape-tool options bar needs no new test file).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

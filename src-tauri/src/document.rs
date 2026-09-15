@@ -4208,6 +4208,20 @@ fn shrink_rect(bounds: Rect, width: u32) -> Option<Rect> {
     })
 }
 
+/// [`shrink_rect`]'s own inverse: `bounds` expanded outward by `width` on
+/// every side, clamped to `0..canvas_width` and `0..canvas_height` so a
+/// shape's Outside or Center stroke never asks for a pixel off the
+/// canvas.
+fn grow_rect(bounds: Rect, width: u32, canvas_width: u32, canvas_height: u32) -> Rect {
+    let width = width as i64;
+    Rect {
+        x0: (bounds.x0 as i64 - width).max(0) as u32,
+        y0: (bounds.y0 as i64 - width).max(0) as u32,
+        x1: (bounds.x1 as i64 + width).min(canvas_width as i64) as u32,
+        y1: (bounds.y1 as i64 + width).min(canvas_height as i64) as u32,
+    }
+}
+
 /// Surface Blur's own edge-preserving weighted mean at `(row, col)`, for
 /// one `channel` of `source`: neighbours within `radius` are averaged,
 /// each weighted `(threshold − |neighbour − own|).max(0)`, so a
@@ -13807,12 +13821,42 @@ impl Document {
         fill: Option<[u8; 4]>,
         stroke: Option<([u8; 4], u32)>,
     ) -> Result<Option<Rect>, String> {
+        self.draw_rectangle_with(
+            id,
+            x0,
+            y0,
+            x1,
+            y1,
+            radius,
+            fill,
+            stroke,
+            StrokePosition::Inside,
+        )
+    }
+
+    /// [`Self::draw_rectangle`] with Photoshop's own Stroke Position —
+    /// see [`Self::draw_shape`] for the exact geometry. At
+    /// `StrokePosition::Inside` this is pixel-identical to
+    /// [`Self::draw_rectangle`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_rectangle_with(
+        &mut self,
+        id: LayerId,
+        x0: f32,
+        y0: f32,
+        x1: f32,
+        y1: f32,
+        radius: u32,
+        fill: Option<[u8; 4]>,
+        stroke: Option<([u8; 4], u32)>,
+        position: StrokePosition,
+    ) -> Result<Option<Rect>, String> {
         let shape = if radius == 0 {
             SelectionShape::Rectangle
         } else {
             SelectionShape::RoundedRectangle { radius }
         };
-        self.draw_shape(id, shape, x0, y0, x1, y1, fill, stroke)
+        self.draw_shape(id, shape, x0, y0, x1, y1, fill, stroke, position)
     }
 
     /// The Ellipse tool in its Pixels mode: paints the ellipse inscribed
@@ -13831,7 +13875,36 @@ impl Document {
         fill: Option<[u8; 4]>,
         stroke: Option<([u8; 4], u32)>,
     ) -> Result<Option<Rect>, String> {
-        self.draw_shape(id, SelectionShape::Ellipse, x0, y0, x1, y1, fill, stroke)
+        self.draw_ellipse_with(id, x0, y0, x1, y1, fill, stroke, StrokePosition::Inside)
+    }
+
+    /// [`Self::draw_ellipse`] with Photoshop's own Stroke Position — see
+    /// [`Self::draw_shape`] for the exact geometry. At
+    /// `StrokePosition::Inside` this is pixel-identical to
+    /// [`Self::draw_ellipse`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_ellipse_with(
+        &mut self,
+        id: LayerId,
+        x0: f32,
+        y0: f32,
+        x1: f32,
+        y1: f32,
+        fill: Option<[u8; 4]>,
+        stroke: Option<([u8; 4], u32)>,
+        position: StrokePosition,
+    ) -> Result<Option<Rect>, String> {
+        self.draw_shape(
+            id,
+            SelectionShape::Ellipse,
+            x0,
+            y0,
+            x1,
+            y1,
+            fill,
+            stroke,
+            position,
+        )
     }
 
     /// The Line tool in its Pixels mode: paints a straight line of
@@ -14101,6 +14174,25 @@ impl Document {
     /// box that rounds to no pixels paints nothing and returns `None`,
     /// like a click with no drag.
     #[allow(clippy::too_many_arguments)]
+    /// The Rectangle and Ellipse tools' shared painter: `shape` over the
+    /// box `(x0, y0)`..`(x1, y1)`, with an optional flat `fill` and an
+    /// optional `stroke` of `(colour, width)` at `position` — Photoshop's
+    /// own Inside, Center, or Outside. `Inside` keeps the whole shape
+    /// (fill and stroke together) exactly inside the drawn box: the
+    /// fill's own edge shrinks inward by `width` ([`shrink_rect`]) and
+    /// the stroke bands the gap back out to the box's own edge.
+    /// `Outside` keeps the fill at the box's own original size and grows
+    /// the stroke outward by `width` ([`grow_rect`], clamped to the
+    /// canvas) instead. `Center` splits `width` across the box's own
+    /// edge — `width / 2` in (Rust's own truncating division), the rest
+    /// out — so the stroke straddles it. Every pixel whose centre falls
+    /// within the *outer* silhouette (the whole shape's own extent,
+    /// [`shape_contains`]) and the active selection is painted: stroke
+    /// colour in the band between the outer edge and the fill's own
+    /// inner edge, fill colour inside that. Errors for a stroke width
+    /// outside `1..=250`, non-finite coordinates, no fill and no stroke,
+    /// or a locked or unknown layer. Anti-aliasing remains a documented
+    /// scope cut.
     fn draw_shape(
         &mut self,
         id: LayerId,
@@ -14111,6 +14203,7 @@ impl Document {
         y1: f32,
         fill: Option<[u8; 4]>,
         stroke: Option<([u8; 4], u32)>,
+        position: StrokePosition,
     ) -> Result<Option<Rect>, String> {
         if fill.is_none() && stroke.is_none() {
             return Err("A shape needs a fill, a stroke, or both.".to_string());
@@ -14126,17 +14219,34 @@ impl Document {
         let Ok(bounds) = normalize_selection_bounds(x0, y0, x1, y1, self.width, self.height) else {
             return Ok(None);
         };
-        let inner = stroke.and_then(|(_, width)| shrink_rect(bounds, width));
+        let (outer, inner) = match stroke {
+            None => (bounds, None),
+            Some((_, width)) => match position {
+                StrokePosition::Inside => (bounds, shrink_rect(bounds, width)),
+                StrokePosition::Outside => (
+                    grow_rect(bounds, width, self.width, self.height),
+                    Some(bounds),
+                ),
+                StrokePosition::Center => {
+                    let half_in = width / 2;
+                    let half_out = width - half_in;
+                    (
+                        grow_rect(bounds, half_out, self.width, self.height),
+                        shrink_rect(bounds, half_in),
+                    )
+                }
+            },
+        };
         let selection = self.selection.clone();
         let doc_width = self.width as usize;
         let layer = self.layer_mut(id)?;
         if layer.locked {
             return Err(format!("Layer \"{}\" is locked.", layer.name));
         }
-        for row in bounds.y0..bounds.y1 {
-            for col in bounds.x0..bounds.x1 {
+        for row in outer.y0..outer.y1 {
+            for col in outer.x0..outer.x1 {
                 let (px, py) = (col as f32 + 0.5, row as f32 + 0.5);
-                if !shape_contains(shape, bounds, px, py)
+                if !shape_contains(shape, outer, px, py)
                     || selection.as_ref().is_some_and(|s| !s.contains(px, py))
                 {
                     continue;
@@ -14152,7 +14262,7 @@ impl Document {
                 layer.pixels[base..base + CHANNELS].copy_from_slice(&color);
             }
         }
-        Ok(Some(bounds))
+        Ok(Some(outer))
     }
 
     /// Color Settings > Ask When Pasting: `Some(clipboard`'s own working
@@ -39871,6 +39981,144 @@ mod tests {
             shape_grid(&doc, id),
             ["SSSSS", "S...S", "S...S", "S...S", "SSSSS"]
         );
+    }
+
+    #[test]
+    fn draw_rectangle_with_outside_stroke_grows_the_ring_beyond_the_box() {
+        // A 3x3 box (2,2)..(5,5) on a 7x7 canvas, Outside stroke width 1:
+        // the fill stays exactly the drawn box, and the stroke ring is
+        // grow_rect(bounds, 1) minus the box itself -- one pixel wider on
+        // every side, entirely outside it.
+        let mut doc = Document::new(7, 7).unwrap();
+        let id = doc
+            .add_layer("l", &solid(7, 7, [0, 0, 0, 0]), 7, 7)
+            .unwrap();
+        doc.draw_rectangle_with(
+            id,
+            2.0,
+            2.0,
+            5.0,
+            5.0,
+            0,
+            Some(FILL),
+            Some((STROKE, 1)),
+            StrokePosition::Outside,
+        )
+        .unwrap();
+        assert_eq!(
+            shape_grid(&doc, id),
+            [".......", ".SSSSS.", ".SFFFS.", ".SFFFS.", ".SFFFS.", ".SSSSS.", ".......",]
+        );
+    }
+
+    #[test]
+    fn draw_rectangle_with_center_stroke_straddles_the_edge() {
+        // Same 3x3 box, Center stroke width 2: an even width splits
+        // exactly in half (1 in, 1 out, Rust's own width/2 truncating
+        // division changing nothing at an even width) -- shrink_rect(box,
+        // 1) leaves only the box's own centre pixel as fill, grow_rect
+        // (box, 1) the same outer ring Outside width 1 already draws.
+        let mut doc = Document::new(7, 7).unwrap();
+        let id = doc
+            .add_layer("l", &solid(7, 7, [0, 0, 0, 0]), 7, 7)
+            .unwrap();
+        doc.draw_rectangle_with(
+            id,
+            2.0,
+            2.0,
+            5.0,
+            5.0,
+            0,
+            Some(FILL),
+            Some((STROKE, 2)),
+            StrokePosition::Center,
+        )
+        .unwrap();
+        assert_eq!(
+            shape_grid(&doc, id),
+            [".......", ".SSSSS.", ".SSSSS.", ".SSFSS.", ".SSSSS.", ".SSSSS.", ".......",]
+        );
+    }
+
+    #[test]
+    fn draw_rectangle_with_center_stroke_truncates_an_odd_width_toward_the_inside() {
+        // Same box, Center stroke width 3: width/2 = 1 in (Rust's
+        // truncating i32 division), width - 1 = 2 out -- asymmetric, more
+        // stroke outside the box's own edge than inside it. shrink_rect
+        // (box, 1) is still the single centre pixel (same as width 2's
+        // own inner edge); grow_rect(box, 2) reaches every pixel of this
+        // 7x7 canvas (x0 = 2-2 = 0, x1 = 5+2 = 7), so only the centre
+        // pixel stays fill.
+        let mut doc = Document::new(7, 7).unwrap();
+        let id = doc
+            .add_layer("l", &solid(7, 7, [0, 0, 0, 0]), 7, 7)
+            .unwrap();
+        doc.draw_rectangle_with(
+            id,
+            2.0,
+            2.0,
+            5.0,
+            5.0,
+            0,
+            Some(FILL),
+            Some((STROKE, 3)),
+            StrokePosition::Center,
+        )
+        .unwrap();
+        assert_eq!(
+            shape_grid(&doc, id),
+            ["SSSSSSS", "SSSSSSS", "SSSSSSS", "SSSFSSS", "SSSSSSS", "SSSSSSS", "SSSSSSS",]
+        );
+    }
+
+    #[test]
+    fn draw_rectangle_with_outside_stroke_clamps_to_the_canvas_edge() {
+        // A box already touching the canvas edge: Outside's own grown
+        // ring would reach off-canvas pixels, which grow_rect simply
+        // clamps away rather than erroring or wrapping.
+        let mut doc = Document::new(4, 4).unwrap();
+        let id = doc
+            .add_layer("l", &solid(4, 4, [0, 0, 0, 0]), 4, 4)
+            .unwrap();
+        doc.draw_rectangle_with(
+            id,
+            0.0,
+            0.0,
+            2.0,
+            2.0,
+            0,
+            Some(FILL),
+            Some((STROKE, 1)),
+            StrokePosition::Outside,
+        )
+        .unwrap();
+        assert_eq!(shape_grid(&doc, id), ["FFS.", "FFS.", "SSS.", "....",]);
+    }
+
+    #[test]
+    fn draw_ellipse_with_position_defaults_to_inside_and_is_pixel_identical() {
+        let mut doc = Document::new(7, 7).unwrap();
+        let id = doc
+            .add_layer("l", &solid(7, 7, [0, 0, 0, 0]), 7, 7)
+            .unwrap();
+        let mut doc2 = Document::new(7, 7).unwrap();
+        let id2 = doc2
+            .add_layer("l", &solid(7, 7, [0, 0, 0, 0]), 7, 7)
+            .unwrap();
+        doc.draw_ellipse(id, 1.0, 1.0, 6.0, 6.0, Some(FILL), Some((STROKE, 1)))
+            .unwrap();
+        doc2.draw_ellipse_with(
+            id2,
+            1.0,
+            1.0,
+            6.0,
+            6.0,
+            Some(FILL),
+            Some((STROKE, 1)),
+            StrokePosition::Inside,
+        )
+        .unwrap();
+        assert_eq!(shape_grid(&doc, id), shape_grid(&doc2, id2));
     }
 
     #[test]

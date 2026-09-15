@@ -4663,8 +4663,9 @@ fn remove_stroke(
     })
 }
 
-/// Rectangle tool (Pixels mode): fill and/or inside-stroke an
-/// axis-aligned, optionally rounded rectangle onto a layer.
+/// Rectangle tool (Pixels mode): fill and/or stroke an axis-aligned,
+/// optionally rounded rectangle onto a layer. `position` (Photoshop's
+/// own Inside/Center/Outside) defaults to Inside.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 fn draw_rectangle(
@@ -4677,14 +4678,26 @@ fn draw_rectangle(
     radius: u32,
     fill: Option<[u8; 4]>,
     stroke: Option<([u8; 4], u32)>,
+    position: Option<document::StrokePosition>,
 ) -> Result<Snapshot, String> {
     edit(&state, |document| {
-        document.draw_rectangle(id, x0, y0, x1, y1, radius, fill, stroke)
+        document.draw_rectangle_with(
+            id,
+            x0,
+            y0,
+            x1,
+            y1,
+            radius,
+            fill,
+            stroke,
+            position.unwrap_or(document::StrokePosition::Inside),
+        )
     })
 }
 
-/// Ellipse tool (Pixels mode): fill and/or inside-stroke the ellipse
-/// inscribed in a dragged box onto a layer.
+/// Ellipse tool (Pixels mode): fill and/or stroke the ellipse inscribed
+/// in a dragged box onto a layer. `position` (Photoshop's own
+/// Inside/Center/Outside) defaults to Inside.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 fn draw_ellipse(
@@ -4696,9 +4709,19 @@ fn draw_ellipse(
     y1: f32,
     fill: Option<[u8; 4]>,
     stroke: Option<([u8; 4], u32)>,
+    position: Option<document::StrokePosition>,
 ) -> Result<Snapshot, String> {
     edit(&state, |document| {
-        document.draw_ellipse(id, x0, y0, x1, y1, fill, stroke)
+        document.draw_ellipse_with(
+            id,
+            x0,
+            y0,
+            x1,
+            y1,
+            fill,
+            stroke,
+            position.unwrap_or(document::StrokePosition::Inside),
+        )
     })
 }
 

@@ -3269,6 +3269,9 @@ export default function App() {
   const [shapeFill, setShapeFill] = useState(true);
   const [shapeStrokeWidth, setShapeStrokeWidth] = useState(0);
   const [shapeStrokeColor, setShapeStrokeColor] = useState("#000000");
+  const [shapeStrokePosition, setShapeStrokePosition] = useState<
+    "outside" | "inside" | "center"
+  >("inside");
   const [shapeRadius, setShapeRadius] = useState(0);
   const [shapeToolMode, setShapeToolMode] = useState<
     "pixels" | "shape" | "path"
@@ -11459,6 +11462,7 @@ export default function App() {
                 y1,
                 fill,
                 stroke,
+                position: shapeStrokePosition,
               });
             } else {
               void runCommand("draw_rectangle", {
@@ -11470,6 +11474,7 @@ export default function App() {
                 radius: shapeRadius,
                 fill,
                 stroke,
+                position: shapeStrokePosition,
               });
             }
           }
@@ -11573,6 +11578,7 @@ export default function App() {
       shapeFill,
       shapeStrokeWidth,
       shapeStrokeColor,
+      shapeStrokePosition,
       shapeRadius,
       shapeToolMode,
       lineWeight,
@@ -15336,6 +15342,22 @@ export default function App() {
                 aria-label="Shape stroke color"
                 onChange={(event) => setShapeStrokeColor(event.target.value)}
               />
+              <label className="tools__slider">
+                Position
+                <select
+                  value={shapeStrokePosition}
+                  disabled={!canPaint || shapeStrokeWidth === 0}
+                  onChange={(event) =>
+                    setShapeStrokePosition(
+                      event.target.value as typeof shapeStrokePosition,
+                    )
+                  }
+                >
+                  <option value="inside">Inside</option>
+                  <option value="center">Center</option>
+                  <option value="outside">Outside</option>
+                </select>
+              </label>
               {tool === "rectangle" && (
                 <label className="tools__slider">
                   Radius
