@@ -1283,6 +1283,7 @@ export default function App() {
   const [toneRange, setToneRange] = useState("midtones");
   const [protectTones, setProtectTones] = useState(false);
   const [symmetry, setSymmetry] = useState<Symmetry | "off">("off");
+  const [patternStampAligned, setPatternStampAligned] = useState(true);
   // The Polygonal Lasso's vertices so far, or the Lasso's drag trail, in
   // document coordinates; the trail also lives in a ref so pointer moves
   // append without re-rendering through stale state.
@@ -9836,6 +9837,7 @@ export default function App() {
           radius: brushSize,
           opacity: Math.round(brushOpacity * 255),
           symmetry: mirrored,
+          aligned: patternStampAligned,
         });
       } else if (channelView.kind === "alpha" || channelView.kind === "spot") {
         // Editing an alpha or spot channel: the brush lays down the
@@ -9903,6 +9905,7 @@ export default function App() {
       brushSize,
       spongeSaturate,
       symmetry,
+      patternStampAligned,
       magicWandTolerance,
       sharpenProtectDetail,
       sharpenSampleAll,
@@ -15621,6 +15624,19 @@ export default function App() {
                 <option value="horizontal">Horizontal</option>
                 <option value="both">Dual Axis</option>
               </select>
+            </label>
+          )}
+          {tool === "patternStamp" && (
+            <label className="tools__slider">
+              <input
+                type="checkbox"
+                checked={patternStampAligned}
+                disabled={!canPaint}
+                onChange={(event) =>
+                  setPatternStampAligned(event.target.checked)
+                }
+              />
+              Aligned
             </label>
           )}
           {(tool === "backgroundEraser" || tool === "colorReplace") && (

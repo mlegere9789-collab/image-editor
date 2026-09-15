@@ -5881,9 +5881,11 @@ fn art_history_stroke(
 }
 
 /// Pattern Stamp tool: paint the defined pattern along `points` on layer
-/// `id`, tiles aligned to the canvas origin. See [`paint_stroke`] for
-/// `points` and checkpointing.
+/// `id`, tiles aligned to the canvas origin unless `aligned` is `false`
+/// (Photoshop's own Aligned checkbox, unchecked). See [`paint_stroke`]
+/// for `points` and checkpointing.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 fn pattern_stamp_stroke(
     state: State<'_, AppState>,
     id: LayerId,
@@ -5891,13 +5893,17 @@ fn pattern_stamp_stroke(
     radius: f32,
     opacity: u8,
     symmetry: Option<document::Symmetry>,
+    aligned: Option<bool>,
 ) -> Result<Snapshot, String> {
     edit(&state, |document| {
         document.stroke_symmetric(
             id,
             &points,
             radius,
-            Stroke::PatternStamp { opacity },
+            Stroke::PatternStamp {
+                opacity,
+                aligned: aligned.unwrap_or(true),
+            },
             symmetry,
         )
     })

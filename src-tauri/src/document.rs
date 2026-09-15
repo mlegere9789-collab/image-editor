@@ -19507,6 +19507,15 @@ impl Document {
             })?),
             _ => None,
         };
+        // Pattern Stamp's own tile phase: the canvas origin when Aligned,
+        // else this stroke's own first point -- computed once per stroke,
+        // never per dab, so the tile stays fixed across the whole drag.
+        let pattern_origin: (i64, i64) = match stroke {
+            Stroke::PatternStamp { aligned: false, .. } => {
+                (points[0].0.floor() as i64, points[0].1.floor() as i64)
+            }
+            _ => (0, 0),
+        };
         // Sample All Layers reads the pre-stroke composite, which has to be
         // built before the layer is mutably borrowed.
         let wants_composite = matches!(
@@ -19876,10 +19885,14 @@ impl Document {
                         };
                         (color, to_unit(color[3]) * c)
                     }
-                    Stroke::PatternStamp { opacity } => {
+                    Stroke::PatternStamp { opacity, .. } => {
                         let pattern = pattern.as_ref().expect("checked above");
-                        let px = (x0 as usize + col) % pattern.width as usize;
-                        let py = (y0 as usize + row) % pattern.height as usize;
+                        let px = (x0 as i64 + col as i64 - pattern_origin.0)
+                            .rem_euclid(pattern.width as i64)
+                            as usize;
+                        let py = (y0 as i64 + row as i64 - pattern_origin.1)
+                            .rem_euclid(pattern.height as i64)
+                            as usize;
                         let src = (py * pattern.width as usize + px) * CHANNELS;
                         let mut color = [0u8; CHANNELS];
                         color.copy_from_slice(&pattern.pixels[src..src + CHANNELS]);
@@ -30226,12 +30239,16 @@ pub enum Stroke<'a> {
     Eraser,
     /// The Pattern Stamp tool: paints the document's defined pattern
     /// ([`Document::define_pattern`]) instead of a flat colour, each pixel
-    /// taking the pattern pixel at `(x mod width, y mod height)` — tiles
-    /// aligned to the canvas origin, Photoshop's default "Aligned" mode —
-    /// with the same `source-over` blend as [`Stroke::Brush`], the pattern
-    /// pixel's own alpha scaled by `opacity` (`0..=255`). Errors when no
-    /// pattern has been defined.
-    PatternStamp { opacity: u8 },
+    /// taking the pattern pixel at `(x - ox mod width, y - oy mod height)`
+    /// — with the same `source-over` blend as [`Stroke::Brush`], the
+    /// pattern pixel's own alpha scaled by `opacity` (`0..=255`). `(ox,
+    /// oy)` is `(0, 0)` — tiles aligned to the canvas origin, Photoshop's
+    /// default "Aligned" mode — when `aligned` is `true`, or this
+    /// particular stroke's own first point when `false` — Photoshop's own
+    /// "Unaligned" mode, where the tile's own phase resets to wherever
+    /// each new stroke starts instead of staying fixed to the canvas.
+    /// Errors when no pattern has been defined.
+    PatternStamp { opacity: u8, aligned: bool },
     /// The Dodge tool: lightens each covered pixel's colour toward white by
     /// `exposure` percent (`0..=100`) scaled by the brush's coverage — per
     /// channel `c + (1 − c) · exposure · coverage` — leaving alpha alone
@@ -54914,7 +54931,10 @@ mod tests {
             target,
             &[(1.5, 1.5)],
             3.0,
-            Stroke::PatternStamp { opacity: 255 },
+            Stroke::PatternStamp {
+                opacity: 255,
+                aligned: true,
+            },
         )
         .unwrap();
         let p = &doc.layers()[1].pixels;
@@ -54930,6 +54950,44 @@ mod tests {
     }
 
     #[test]
+    fn pattern_stamp_unaligned_resets_the_tile_phase_to_the_strokes_first_point() {
+        // Same fixture and geometry as
+        // pattern_stamp_paints_the_aligned_pattern_at_full_coverage (the
+        // 2x2 tile 20 30 / 50 60, a full-coverage stamp at (1.5, 1.5)),
+        // but with aligned: false: the tile's own phase resets to this
+        // stroke's first point, floor(1.5) = (1, 1) -- exactly half the
+        // tile's own 2x2 period in each direction, so every sample lands
+        // on the diagonally opposite tile cell from the aligned case:
+        // 20<->60 and 30<->50 swap throughout, turning that test's own
+        // (20, 30, 20 / 50, 60, 50 / 20, 30, 20) into (60, 50, 60 / 30,
+        // 20, 30 / 60, 50, 60).
+        let (mut doc, id) = ramped_3x3();
+        doc.select_rectangle(1.0, 0.0, 3.0, 2.0).unwrap();
+        doc.define_pattern(id).unwrap();
+        doc.deselect();
+        let target = doc.add_layer("stamp", &[0u8; 36], 3, 3).unwrap();
+        doc.stroke(
+            target,
+            &[(1.5, 1.5)],
+            3.0,
+            Stroke::PatternStamp {
+                opacity: 255,
+                aligned: false,
+            },
+        )
+        .unwrap();
+        let p = &doc.layers()[1].pixels;
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let grid: Vec<Vec<u8>> = (0..3)
+            .map(|y| (0..3).map(|x| p[idx(x, y)]).collect())
+            .collect();
+        assert_eq!(
+            grid,
+            vec![vec![60, 50, 60], vec![30, 20, 30], vec![60, 50, 60]]
+        );
+    }
+
+    #[test]
     fn pattern_stamp_opacity_scales_the_pattern_alpha() {
         // Onto a transparent layer, a half-opacity stamp keeps the pattern
         // colour and lands alpha 128 (to_byte(128/255)).
@@ -54940,7 +54998,10 @@ mod tests {
             target,
             &[(1.5, 1.5)],
             3.0,
-            Stroke::PatternStamp { opacity: 128 },
+            Stroke::PatternStamp {
+                opacity: 128,
+                aligned: true,
+            },
         )
         .unwrap();
         assert_eq!(pixel(&doc, target, 1, 1), [50, 0, 0, 128]);
@@ -54957,7 +55018,10 @@ mod tests {
                 target,
                 &[(1.5, 1.5)],
                 3.0,
-                Stroke::PatternStamp { opacity: 255 }
+                Stroke::PatternStamp {
+                    opacity: 255,
+                    aligned: true
+                }
             )
             .is_err());
         assert_eq!(doc.layers()[1].pixels, vec![0u8; 36]);
@@ -54968,7 +55032,10 @@ mod tests {
             target,
             &[(1.5, 1.5)],
             3.0,
-            Stroke::PatternStamp { opacity: 255 },
+            Stroke::PatternStamp {
+                opacity: 255,
+                aligned: true,
+            },
         )
         .unwrap();
         assert_eq!(pixel(&doc, target, 0, 0), [10, 0, 0, 255]);
@@ -54986,7 +55053,10 @@ mod tests {
                 id,
                 &[(1.5, 1.5)],
                 3.0,
-                Stroke::PatternStamp { opacity: 255 }
+                Stroke::PatternStamp {
+                    opacity: 255,
+                    aligned: true
+                }
             )
             .is_err());
         assert_eq!(doc.layers()[0].pixels, ramped_3x3().0.layers()[0].pixels);

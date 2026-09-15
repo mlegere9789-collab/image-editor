@@ -23505,6 +23505,55 @@ Tests: 1915 Rust (1914 → 1915), 33 frontend (unchanged — a Style
 dropdown, two sliders, and a checkbox added to the existing Fill Layer
 dialog's Gradient case, no new test file needed).
 
+## Phase 402 — Pattern Stamp's Unaligned Mode
+
+PATTERN STAMP TOOL's own "unaligned mode" scope cut was the next
+largest-impact item in `docs/PLAN_TO_100.md`'s Phase D backlog.
+`Stroke::PatternStamp` gains a new required field, `aligned: bool`,
+alongside its existing `opacity` — the same enum-widening choice Phase
+399's Blur tool made, since `stroke_inner`'s own match dispatches on
+`Stroke`'s shape directly. Its 6 real call sites (5 in this project's own
+tests, 1 in the `pattern_stamp_stroke` Tauri command) each needed
+`aligned: true` added mechanically, the same scripted-find-then-verify
+approach Phase 399 used; `cargo build`/`cargo test --no-run` confirmed no
+other site existed. Photoshop's own Aligned checkbox controls the tile's
+phase: checked (the default, and this project's own only previous
+behaviour), the tile stays fixed to the canvas origin across every
+stroke; unchecked, each new stroke's own first point becomes the tile's
+new phase, so the pattern appears to travel with the brush instead of
+staying pinned to the canvas. `stroke_inner` computes this once per
+stroke — `pattern_origin = (0, 0)` when aligned, or this stroke's own
+first point (floored) when not — before the per-pixel loop begins, so
+the tile phase never drifts mid-stroke; the pixel formula changed from
+the flat `(x mod w, y mod h)` to `((x − ox) mod w, (y − oy) mod h)` via
+`rem_euclid` (Euclidean remainder, correct for the negative operands an
+offset first point can produce, unlike Rust's `%`). At `aligned: true`,
+`pattern_origin` is always `(0, 0)`, so `rem_euclid` on non-negative
+`x`/`y` is exactly `%` — pixel-identical to the original formula.
+`pattern_stamp_stroke`'s Tauri command widened to take an optional
+`aligned` (defaulting to `true`). The frontend's Pattern Stamp options
+bar gained an Aligned checkbox next to the existing Symmetry dropdown,
+checked by default to match Photoshop's own default and this project's
+own prior behaviour.
+
+**Verified.** All 4 pre-existing Pattern Stamp tests pass unmodified in
+behaviour (each updated only to pass `aligned: true` explicitly). One
+new hand-computed test,
+`pattern_stamp_unaligned_resets_the_tile_phase_to_the_strokes_first_point`,
+reuses `pattern_stamp_paints_the_aligned_pattern_at_full_coverage`'s own
+fixture and geometry (the 2×2 tile `20, 30 / 50, 60`, a full-coverage
+stamp at `(1.5, 1.5)`) with `aligned: false`: the phase resets to
+`floor(1.5) = (1, 1)` — exactly half the tile's own 2×2 period in each
+direction — so every sample lands on the diagonally opposite tile cell
+from the aligned case, turning that test's own known grid (`20, 30, 20 /
+50, 60, 50 / 20, 30, 20`) into its diagonal complement (`60, 50, 60 / 30,
+20, 30 / 60, 50, 60`) — a real, contrasting result computed by hand and
+confirmed exactly on the first run. `cargo fmt`/`clippy --all-targets -D
+warnings`/`test` and `npm run build`/`test`/`tsc --noEmit` all clean.
+
+Tests: 1916 Rust (1915 → 1916), 33 frontend (unchanged — one checkbox,
+no dedicated frontend test suite for the options bar's plain controls).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
