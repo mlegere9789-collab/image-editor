@@ -443,6 +443,10 @@ pub struct GradientOverlayOptions {
     pub align_with_layer: bool,
     /// Opacity, 0–100.
     pub opacity: u32,
+    /// Blend Mode: narrows `gradient_overlay_with`'s own former
+    /// Normal-only scope cut, the same way `color_overlay_with` already
+    /// narrows `color_overlay`'s.
+    pub blend_mode: BlendMode,
 }
 
 impl Default for ContentAwareFillOptions {
@@ -24012,9 +24016,12 @@ impl Document {
     /// angle itself at `0`, sweeping counter-clockwise to `1`. Scale
     /// divides `u`, `v`, and the distance, so 50 % fits the gradient in
     /// half the box. Reverse reads `1 − t`. `t` is clamped to `0..=1` and
-    /// mixes `color1` to `color2`, blended over the pixel by the opacity;
-    /// transparent pixels are left alone. Dither and the blend mode remain
-    /// documented scope cuts. See README Phase 353.
+    /// mixes `color1` to `color2` through `options.blend_mode` (each
+    /// channel `blend_mode.blend(Cb, Cs)` first, Opacity mixing toward
+    /// that result, `Normal` collapsing to the original flat mix) before
+    /// blending over the pixel by the opacity; transparent pixels are
+    /// left alone. Dither remains a documented scope cut. See README
+    /// Phases 353 and 391.
     pub fn gradient_overlay_with(
         &mut self,
         id: LayerId,
@@ -24049,6 +24056,7 @@ impl Document {
         let along = (hw * cos).abs() + (hh * sin).abs();
         let across = (hw * sin).abs() + (hh * cos).abs();
         let (style, reverse, color1, color2) = (o.style, o.reverse, o.color1, o.color2);
+        let blend_mode = o.blend_mode;
         let frac = o.opacity as f32 / 100.0;
         let w = self.width as usize;
         self.filter_pixels(id, move |src, row, col| {
@@ -24077,10 +24085,9 @@ impl Document {
             let mut out = [0u8; CHANNELS];
             for c in 0..3 {
                 let target = color1[c] as f32 + (color2[c] as f32 - color1[c] as f32) * t;
-                let vsrc = src[base + c] as f32;
-                out[c] = (vsrc * (1.0 - frac) + target * frac)
-                    .round()
-                    .clamp(0.0, 255.0) as u8;
+                let cb = to_unit(src[base + c]);
+                let blended = blend_mode.blend(cb, target / 255.0);
+                out[c] = to_byte(cb * (1.0 - frac) + blended * frac);
             }
             out[3] = a;
             out
@@ -49459,6 +49466,7 @@ mod tests {
             reverse: false,
             align_with_layer: false,
             opacity: 100,
+            blend_mode: BlendMode::Normal,
         }
     }
 
@@ -49609,6 +49617,40 @@ mod tests {
                 }
             )
             .is_err());
+    }
+
+    #[test]
+    fn gradient_overlay_with_multiply_blends_the_gradient_colour_first() {
+        // column_stripes_fixture (R=G=B = 10, 20, 30, 40 across four
+        // columns), the same Linear/angle-0 gradient
+        // gradient_overlay_with_styles_angle_scale_reverse_and_alignment's
+        // own first case reads as targets 0, 85, 170, 255 -- but through
+        // Multiply, at full opacity, instead of Normal. Multiply's own
+        // B(Cb, Cs) = Cb * Cs: column 0's target 0 (Cs = 0) blocks the dab
+        // entirely regardless of Cb, giving exactly 0 -- not the original
+        // 10 an all-zero-effect blend would leave, and not the flat 0
+        // Normal already gives here either (the two coincide only because
+        // target happens to be 0 at this one column). Column 3's target
+        // 255 (Cs = 1.0) leaves Cb entirely unchanged: 40, byte for byte
+        // -- a real, contrasting result against Normal's own full-opacity
+        // reading at this column, which replaces it with 255 outright
+        // (row[3] == 255 in the Reverse case just above, same column,
+        // same fixture). Columns 1 and 2 land on exact integers: 20 *
+        // 85/255 = 20/3 = 6.667 -> 7; 30 * 170/255 = 30 * 2/3 = 20 exactly.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let first_row = |doc: &Document| -> Vec<u8> {
+            (0..4).map(|x| doc.layers()[0].pixels[idx(x, 0)]).collect()
+        };
+        let (mut doc, id) = column_stripes_fixture();
+        doc.gradient_overlay_with(
+            id,
+            &GradientOverlayOptions {
+                blend_mode: BlendMode::Multiply,
+                ..gradient_options()
+            },
+        )
+        .unwrap();
+        assert_eq!(first_row(&doc), vec![0, 7, 20, 40]);
     }
 
     #[test]

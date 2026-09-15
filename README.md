@@ -23077,6 +23077,46 @@ run build`/`test` all clean.
 Tests: 1903 Rust (1901 → 1903), 33 frontend (unchanged — one dropdown
 reusing state and a list this session already fetches).
 
+## Phase 392 — Gradient Overlay's Blend Mode
+
+Phase 391's own Blend Mode narrowing, extended to the second layer-style
+effect that shares the same "Normal only" scope cut: Gradient Overlay.
+Unlike Color Overlay, this one had no plain-and-`_with` pair to extend —
+`gradient_overlay_with(id, options: &GradientOverlayOptions)` is already
+the sole, options-struct-based entry point every caller (and the
+generative Tauri command) uses, so `blend_mode: BlendMode` joins
+`GradientOverlayOptions` directly rather than growing a new function. The
+mixing step becomes the same shape Phase 391 introduced: `blend_mode.blend
+(Cb, Cs)` against the interpolated gradient colour first, Opacity mixing
+toward that result — `Normal` collapsing it back to the field's own
+original flat formula.
+
+One real slip caught before it shipped: a first pass added a _second_,
+differently-shaped `gradient_overlay_with` (plain `color1`/`color2`/
+`direction`/`opacity`/`blend_mode` arguments, mirroring `color_overlay`'s
+own simpler shape) without noticing the options-struct version already
+existed under that exact name — an immediate duplicate-definition compile
+error. Reverted before touching anything else, then redone the right way:
+one field added to the existing options struct, not a competing function.
+
+**Verified.** One new Rust test, hand-computed, plus all 7 pre-existing
+Gradient Overlay tests (unmodified, via a shared `gradient_options()`
+helper that now always supplies `blend_mode: BlendMode::Normal`) still
+pass. On `column_stripes_fixture` (R=G=B = 10, 20, 30, 40 across four
+columns) under the same Linear/angle-0 gradient the existing style tests
+already use (targets 0, 85, 170, 255), Multiply at full opacity: column 0
+(target 0, `Cs = 0`) blocks entirely regardless of source, landing at
+exactly 0; column 3 (target 255, `Cs = 1.0`) leaves the source completely
+unchanged at 40 — a real, contrasting result against Normal's own
+full-opacity reading at this same column (255, from the Reverse case in
+the styles test right above); columns 1 and 2 land on exact integers (20 ×
+85/255 = 6.667 → 7; 30 × 170/255 = 30 × 2/3 = 20 exactly), not
+coincidental round numbers. `cargo fmt`/`clippy --all-targets -D
+warnings`/`test` and `npm run build`/`test` all clean.
+
+Tests: 1904 Rust (1903 → 1904), 33 frontend (unchanged — one dropdown,
+same pattern as Phase 391's).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

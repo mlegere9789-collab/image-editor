@@ -2034,6 +2034,8 @@ export default function App() {
   const [gradientOverlayScale, setGradientOverlayScale] = useState(100);
   const [gradientOverlayReverse, setGradientOverlayReverse] = useState(false);
   const [gradientOverlayAlign, setGradientOverlayAlign] = useState(true);
+  const [gradientOverlayBlendMode, setGradientOverlayBlendMode] =
+    useState<BlendMode>("normal");
   const [showOuterGlowDialog, setShowOuterGlowDialog] = useState(false);
   const [outerGlowSize, setOuterGlowSize] = useState(10);
   const [outerGlowColor, setOuterGlowColor] = useState("#ffff00");
@@ -6255,6 +6257,7 @@ export default function App() {
         reverse: gradientOverlayReverse,
         alignWithLayer: gradientOverlayAlign,
         opacity: gradientOverlayOpacity,
+        blendMode: gradientOverlayBlendMode,
       },
     });
     setShowGradientOverlayDialog(false);
@@ -6269,6 +6272,7 @@ export default function App() {
     gradientOverlayReverse,
     gradientOverlayAlign,
     gradientOverlayOpacity,
+    gradientOverlayBlendMode,
   ]);
 
   const applyOuterGlow = useCallback(async () => {
@@ -25345,6 +25349,21 @@ export default function App() {
                 <option value="angle">Angle</option>
                 <option value="reflected">Reflected</option>
                 <option value="diamond">Diamond</option>
+              </select>
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Blend Mode</span>
+              <select
+                value={gradientOverlayBlendMode}
+                onChange={(event) =>
+                  setGradientOverlayBlendMode(event.target.value as BlendMode)
+                }
+              >
+                {blendModes.map((info) => (
+                  <option key={info.mode} value={info.mode}>
+                    {info.label}
+                  </option>
+                ))}
               </select>
             </label>
             <label className="control">
