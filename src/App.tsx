@@ -11,6 +11,7 @@ import DockZoneSplitter from "./DockZoneSplitter";
 import MenuBar, { toolbarEntries } from "./MenuBar";
 import Tour from "./Tour";
 import { documentPoint, percentOf, pixelDistance, ringStyle } from "./blurPins";
+import { nextCloneOffset } from "./cloneStamp";
 import {
   angleAt,
   handleDragToPercent,
@@ -1298,9 +1299,12 @@ export default function App() {
   const rulerStart = useRef<[number, number] | null>(null);
   const moveStart = useRef<[number, number] | null>(null);
   // Clone Stamp: the Alt-clicked sampling point, and the offset from the
-  // first stroke point to it, kept across strokes (Photoshop's Aligned).
+  // first stroke point to it, kept across strokes when Aligned (Photoshop's
+  // own default) or recomputed fresh at the start of every stroke when not
+  // -- the Healing Brush shares this same state but stays Aligned-only.
   const [cloneSource, setCloneSource] = useState<[number, number] | null>(null);
   const cloneOffset = useRef<[number, number] | null>(null);
+  const [cloneStampAligned, setCloneStampAligned] = useState(true);
   const [colorSamplers, setColorSamplers] = useState<[number, number][]>([]);
   const [showLayerCompsDialog, setShowLayerCompsDialog] = useState(false);
   const [layerCompName, setLayerCompName] = useState("Comp 1");
@@ -10816,13 +10820,15 @@ export default function App() {
           return;
         }
         if (!cloneSource) return;
-        if (cloneOffset.current === null) {
-          const [px, py] = toDocPoint(event, document);
-          cloneOffset.current = [
-            Math.round(cloneSource[0] - px),
-            Math.round(cloneSource[1] - py),
-          ];
-        }
+        // The Healing Brush shares this state but has no Aligned toggle of
+        // its own -- it always behaves as Aligned.
+        const aligned = tool === "healingBrush" || cloneStampAligned;
+        cloneOffset.current = nextCloneOffset(
+          cloneOffset.current,
+          aligned,
+          cloneSource,
+          toDocPoint(event, document),
+        );
       }
       event.currentTarget.setPointerCapture(event.pointerId);
       const point = toDocPoint(event, document);
@@ -10851,6 +10857,8 @@ export default function App() {
       hasSelection,
       isCloneStamp,
       cloneSource,
+      cloneStampAligned,
+      tool,
       isLasso,
       isMagneticLasso,
       isObjectSelect,
@@ -15592,6 +15600,19 @@ export default function App() {
                 ? `Source (${Math.floor(cloneSource[0])}, ${Math.floor(cloneSource[1])})`
                 : "Alt-click to set the source"}
             </span>
+          )}
+          {tool === "cloneStamp" && (
+            <label
+              className="tools__slider"
+              title="Clone Stamp: Aligned keeps one offset from the source across every later stroke; Not Aligned starts each stroke sampling from the source again"
+            >
+              <input
+                type="checkbox"
+                checked={cloneStampAligned}
+                onChange={(event) => setCloneStampAligned(event.target.checked)}
+              />
+              Aligned
+            </label>
           )}
           {tool === "colorSampler" && (
             <button

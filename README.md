@@ -23722,6 +23722,53 @@ Tests: 1921 Rust (1918 → 1921), 33 frontend (unchanged — a Layers-panel
 slider pair needs no new test file, the same shape Opacity's own slider
 already has).
 
+## Phase 406 — Clone Stamp's Not Aligned Mode
+
+CLONE STAMP TOOL's own "the non-aligned mode is a documented scope cut"
+line was next in `docs/PLAN_TO_100.md`'s Phase D backlog. Unlike most of
+this arc's phases it needed no Rust at all: `Stroke::Clone { offset }`
+already just paints at whatever `offset` it is given for the whole
+stroke, and Aligned-vs-Not-Aligned is entirely a question of *how the
+frontend computes that one offset between separate strokes* — a
+frontend-only capability, the same way Discover Panel, Rich Tooltips, and
+Custom Toolbar (Phases 275-277) were.
+
+The existing code only ever computed `cloneOffset` once, lazily, the
+first time it was `null` after an Alt-click — never again until the next
+Alt-click — which is exactly Photoshop's Aligned behaviour and, until
+now, this project's only one. Not Aligned needs the same offset
+recomputed fresh, from the same fixed source point, at the start of
+*every* stroke instead of just the first. That one continuity rule is
+pulled out into a new pure function, `nextCloneOffset(current, aligned,
+source, point)`, in a new `src/cloneStamp.ts`: Aligned returns `current`
+unchanged once it has one, Not Aligned always recomputes `source − point`
+— the same extract-a-pure-function-for-unit-testing shape
+`typeInlineEdit.ts`/`blurPins.ts`/`freeTransformHandles.ts` already use for
+logic that would otherwise be buried inside a pointer-event handler. The
+canvas's pointer-down handler now calls it unconditionally instead of only
+when `cloneOffset.current` was still `null`, with `aligned` computed as
+`tool === "healingBrush" || cloneStampAligned` — the Healing Brush shares
+the exact same `cloneSource`/`cloneOffset` state (it always samples from
+an Alt-clicked point the identical way) but has no Aligned toggle of its
+own in Photoshop, so it stays Aligned-only regardless of the new
+checkbox. A new `cloneStampAligned` boolean state, default `true`
+(Photoshop's own default), gets a checkbox in the tool options bar right
+next to the existing "Source (x, y)" / "Alt-click to set the source"
+readout, shown only for the Clone Stamp tool itself.
+
+**Verified.** Three new hand-computed tests in `src/cloneStamp.test.ts`:
+Aligned keeps a first stroke's offset — source `(100, 40)`, first stroke
+starting at `(10, 10)` → offset `(90, 30)` — across a second, unrelated
+stroke starting at `(500, 500)`; Not Aligned, given the identical source
+and first stroke, computes the same first offset but then a second stroke
+starting at `(70, 25)` gets its own fresh `(30, 15)` rather than
+inheriting the first; a fractional document point rounds to the nearest
+whole pixel (`100.6 − 10.2 = 90.4 → 90`). `npm run build`/`test`/`tsc
+--noEmit` all clean; no Rust files touched, so `cargo test`'s own 1921
+were re-run once to confirm (unaffected, as expected).
+
+Tests: 1921 Rust (unchanged), 36 frontend (33 → 36).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
