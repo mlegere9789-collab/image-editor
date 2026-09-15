@@ -25096,6 +25096,55 @@ new frontend pure logic, so the frontend test count is unchanged.
 Tests: 1968 Rust (1966 → 1968: two new tests), 39 frontend
 (unchanged).
 
+## Phase 430 — Define Brush Preset's Texture
+
+A stale-scope-cut check on Define Brush Preset's own row, the same
+pattern that already caught three earlier ones this project (Mixer
+Brush's Sample All Layers, Move Tool's Auto-Select, Select and Mask's
+Edge Detection): the row named Texture as its last missing piece, but
+`tip_stroke_dynamic` already receives the exact same `BrushDynamics`
+struct — `texture_depth` included — the plain Brush tool's own
+`stroke_dynamic` reads for its own Texture. The gap wasn't the data
+reaching the function; `tip_stroke_inner`'s own dynamics branch simply
+never read that field once it got there.
+
+The fix mirrors `stroke_inner`'s own Texture step exactly, adapted to
+`tip_stroke_inner`'s sparse `HashMap<(i64, i64), f32>` coverage instead
+of a dense array: when `texture_depth > 0`, the defined pattern is
+required up front (erroring with the same message `stroke_dynamic`
+already uses if none is set) and, for every covered pixel, its own
+tiled texel's luminance — `0.299R + 0.587G + 0.114B`, the pattern
+tiled from the canvas origin exactly as Pattern Stamp tiles it — scales
+that pixel's own coverage down toward zero at Depth 100 for a fully
+dark texel, unchanged for a fully light one, before the selection's own
+coverage and the final compositing already there. Dual Brush (Phase
+424) stays a documented scope cut here: it was built only for
+`stroke_inner`, the plain Brush/Eraser path, not `tip_stroke_inner`.
+
+Two new hand-computed tests, reusing the existing `tip_stroke_dynamic`
+test's own 5×1 horizontal tip and single-dab stamp exactly — first
+pinning down precisely which five columns it paints (18 through 22 at
+row 5, not previously asserted individually, only counted) so the
+texture test below has an exact, verified canvas to reason about. A
+2×1 black-then-white pattern, the same fixture the plain Brush tool's
+own Texture test already uses, tiled from the canvas origin at Depth
+100: the three even columns (18, 20, 22) land on the black texel and
+are blocked to alpha 0 entirely; the two odd columns (19, 21) land on
+white and stay at full alpha 255. A second test confirms Texture above
+zero depth still refuses to run without a pattern defined, the same
+guard `stroke_dynamic` already has. All pre-existing `tip_stroke_*`
+tests pass unmodified.
+
+No frontend change needed at all: the Brush Settings dialog's own
+Texture slider already writes into the same shared `brushDynamics`
+state `tip_stroke_dynamic`'s own call already sends wholesale via
+`dynamics()`, so it was only ever the backend that had never read the
+field it was already being handed. `cargo fmt`/`clippy --all-targets
+-D warnings`/`test` and `npx tsc --noEmit`/`npm run build`/`npm test`
+all clean (frontend genuinely untouched).
+
+Tests: 1970 Rust (1968 → 1970: two new tests), 39 frontend (unchanged).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

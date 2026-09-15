@@ -12074,6 +12074,14 @@ impl Document {
         {
             return Err("Stroke points must be finite coordinates.".to_string());
         }
+        let texture_active = dynamics.is_some_and(|d| d.texture_depth > 0);
+        let pattern = if texture_active {
+            Some(self.pattern.clone().ok_or_else(|| {
+                "Texture needs a pattern defined first (Edit > Define Pattern).".to_string()
+            })?)
+        } else {
+            None
+        };
         let selection = self.selection.clone();
         let (width, height) = (self.width as i64, self.height as i64);
         let doc_width = self.width as usize;
@@ -12150,6 +12158,18 @@ impl Document {
         }
         let mut touched: Option<Rect> = None;
         for ((px, py), mut c) in coverage {
+            if let Some(pattern) = &pattern {
+                let depth =
+                    dynamics.expect("texture_active implies Some").texture_depth as f32 / 100.0;
+                let tx = px as usize % pattern.width as usize;
+                let ty = py as usize % pattern.height as usize;
+                let src = (ty * pattern.width as usize + tx) * CHANNELS;
+                let luminance = (0.299 * pattern.pixels[src] as f32
+                    + 0.587 * pattern.pixels[src + 1] as f32
+                    + 0.114 * pattern.pixels[src + 2] as f32)
+                    / 255.0;
+                c *= 1.0 - depth * (1.0 - luminance);
+            }
             if let Some(s) = &selection {
                 c *= s.coverage(px as f32 + 0.5, py as f32 + 0.5);
             }
@@ -56385,8 +56405,85 @@ mod tests {
         let painted_row: Vec<u32> = (0..30u32)
             .filter(|&x| pixel(&d, target, x, 5)[3] > 0)
             .collect();
-        assert_eq!(painted_row.len(), 5, "{painted_row:?}");
+        assert_eq!(painted_row, vec![18, 19, 20, 21, 22]);
         assert!((0..30u32).all(|y| y == 5 || pixel(&d, target, 20, y)[3] == 0));
+    }
+
+    #[test]
+    fn tip_stroke_dynamic_texture_scales_coverage_by_the_defined_patterns_own_luminance() {
+        // Same 5x1 horizontal tip and single-dab stamp as the test above,
+        // painting exactly columns 18-22 at row 5. A 2x1 pattern -- pure
+        // black then pure white, the same fixture
+        // texture_scales_coverage_by_the_defined_patterns_own_luminance
+        // already uses for the plain Brush tool -- is tiled from the
+        // canvas origin: even columns (18, 20, 22) land on the black
+        // texel and, at Depth 100, are blocked entirely; odd columns
+        // (19, 21) land on white and are left at full opacity.
+        let red = [200, 40, 40, 255];
+        let mut source = Document::new(2, 1).unwrap();
+        let src_id = source
+            .add_layer("src", &[0, 0, 0, 255, 255, 255, 255, 255], 2, 1)
+            .unwrap();
+        source.define_pattern(src_id).unwrap();
+        let mut d = Document::new(30, 30).unwrap();
+        d.pattern = source.pattern.clone();
+        let mut line = vec![0u8; 30 * 30 * CHANNELS];
+        for x in 10..15 {
+            line[(15 * 30 + x) * CHANNELS..(15 * 30 + x) * CHANNELS + 4]
+                .copy_from_slice(&[0, 0, 0, 255]);
+        }
+        let tip_layer = d.add_layer("tip", &line, 30, 30).unwrap();
+        d.define_brush_tip(tip_layer).unwrap();
+        let target = d
+            .add_layer("paint", &[0; 30 * 30 * CHANNELS], 30, 30)
+            .unwrap();
+        d.tip_stroke_dynamic(
+            target,
+            &[(20.0, 5.0)],
+            red,
+            &BrushDynamics {
+                texture_depth: 100,
+                ..BrushDynamics::default()
+            },
+        )
+        .unwrap();
+        for x in [18, 20, 22] {
+            assert_eq!(pixel(&d, target, x, 5)[3], 0, "black texel blocks x={x}");
+        }
+        for x in [19, 21] {
+            assert_eq!(
+                pixel(&d, target, x, 5)[3],
+                255,
+                "white texel lets x={x} through"
+            );
+        }
+    }
+
+    #[test]
+    fn tip_stroke_dynamic_texture_needs_a_pattern_defined() {
+        let red = [200, 40, 40, 255];
+        let mut d = Document::new(30, 30).unwrap();
+        let mut line = vec![0u8; 30 * 30 * CHANNELS];
+        for x in 10..15 {
+            line[(15 * 30 + x) * CHANNELS..(15 * 30 + x) * CHANNELS + 4]
+                .copy_from_slice(&[0, 0, 0, 255]);
+        }
+        let tip_layer = d.add_layer("tip", &line, 30, 30).unwrap();
+        d.define_brush_tip(tip_layer).unwrap();
+        let target = d
+            .add_layer("paint", &[0; 30 * 30 * CHANNELS], 30, 30)
+            .unwrap();
+        assert!(d
+            .tip_stroke_dynamic(
+                target,
+                &[(20.0, 5.0)],
+                red,
+                &BrushDynamics {
+                    texture_depth: 1,
+                    ..BrushDynamics::default()
+                },
+            )
+            .is_err());
     }
 
     #[test]
