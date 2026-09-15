@@ -13915,13 +13915,14 @@ impl Document {
     /// (butt caps, as Photoshop draws them; a centre past either end is
     /// left alone even when it is within `weight / 2` of the endpoint) —
     /// the same hard pixel-centre rule the other shape tools use, so
-    /// Photoshop's Anti-alias option is a documented scope cut, as are its
-    /// arrowheads and its Shape and Path modes. Pixels are overwritten
-    /// outright and the active selection confines the paint. Returns the
-    /// segment's bounding box grown by `weight / 2` and clipped to the
-    /// canvas, or `None` — painting nothing — for a zero-length line or
-    /// one entirely off the canvas. Errors for a `weight` outside
-    /// `1..=250`, non-finite ends, or a locked or unknown layer.
+    /// Photoshop's Anti-alias option and its Shape and Path modes are
+    /// documented scope cuts — see [`Self::draw_line_with`] for its
+    /// arrowheads. Pixels are overwritten outright and the active
+    /// selection confines the paint. Returns the segment's bounding box
+    /// grown by `weight / 2` and clipped to the canvas, or `None` —
+    /// painting nothing — for a zero-length line or one entirely off the
+    /// canvas. Errors for a `weight` outside `1..=250`, non-finite ends,
+    /// or a locked or unknown layer.
     #[allow(clippy::too_many_arguments)]
     pub fn draw_line(
         &mut self,
@@ -13933,26 +13934,113 @@ impl Document {
         weight: u32,
         color: [u8; 4],
     ) -> Result<Option<Rect>, String> {
+        self.draw_line_with(id, x0, y0, x1, y1, weight, color, false, false, 50, 100, 0)
+    }
+
+    /// [`Self::draw_line`] with Photoshop's own Arrowheads: `start_arrow`
+    /// and `end_arrow` each toggle a triangular (or kited, with
+    /// `arrow_concavity`) head at that end, sharing one `arrow_width_percent`
+    /// (of `weight`, `10..=1000`), `arrow_length_percent` (of `weight`,
+    /// `10..=5000`), and `arrow_concavity` (`-50..=50`) the way Photoshop's
+    /// own Arrowheads panel does. An active head's four vertices are the
+    /// tip (the line's own endpoint), the two corners of a base set back
+    /// from the tip by the arrow length — offset half the arrow width
+    /// either way along the line's own perpendicular — and a point at the
+    /// base's own midpoint nudged toward the tip by `concavity` percent of
+    /// the arrow length (negative nudges it away instead), painted by the
+    /// shape tools' even-odd pixel-centre rule ([`point_in_polygon`]) in
+    /// the same flat `color` as the line itself, unioned with the line's
+    /// own rectangle — an arrowhead's own base can be wider than the line,
+    /// so it never leaves a gap where the two meet. Errors for
+    /// `arrow_width_percent` outside `10..=1000` or `arrow_length_percent`
+    /// outside `10..=5000` when either arrowhead is active (both are
+    /// ignored, unchecked, when neither is), or `arrow_concavity` outside
+    /// `-50..=50`; everything else — the weight, the coordinates, the
+    /// selection, the locked-layer and zero-length cases — is
+    /// [`Self::draw_line`]'s own. At `start_arrow: false, end_arrow: false`
+    /// this is pixel-identical to [`Self::draw_line`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_line_with(
+        &mut self,
+        id: LayerId,
+        x0: f32,
+        y0: f32,
+        x1: f32,
+        y1: f32,
+        weight: u32,
+        color: [u8; 4],
+        start_arrow: bool,
+        end_arrow: bool,
+        arrow_width_percent: u32,
+        arrow_length_percent: u32,
+        arrow_concavity: i32,
+    ) -> Result<Option<Rect>, String> {
         if !(1..=250).contains(&weight) {
             return Err("Line weight must be between 1 and 250.".to_string());
         }
         if ![x0, y0, x1, y1].iter().all(|v| v.is_finite()) {
             return Err("Line coordinates must be finite numbers.".to_string());
         }
+        if start_arrow || end_arrow {
+            if !(10..=1000).contains(&arrow_width_percent) {
+                return Err("Arrowhead width must be between 10% and 1000%.".to_string());
+            }
+            if !(10..=5000).contains(&arrow_length_percent) {
+                return Err("Arrowhead length must be between 10% and 5000%.".to_string());
+            }
+        }
+        if !(-50..=50).contains(&arrow_concavity) {
+            return Err("Arrowhead concavity must be between -50% and 50%.".to_string());
+        }
         let (dx, dy) = (x1 - x0, y1 - y0);
         let len_sq = dx * dx + dy * dy;
         if len_sq <= f32::EPSILON {
             return Ok(None);
         }
+        let length = len_sq.sqrt();
         let half = weight as f32 / 2.0;
-        let Ok(bounds) = normalize_selection_bounds(
-            x0.min(x1) - half,
-            y0.min(y1) - half,
-            x0.max(x1) + half,
-            y0.max(y1) + half,
-            self.width,
-            self.height,
-        ) else {
+        let arrow_len = weight as f32 * arrow_length_percent as f32 / 100.0;
+        let arrow_half_width = weight as f32 * arrow_width_percent as f32 / 200.0;
+        let arrowhead = |tail: (f32, f32), tip: (f32, f32)| -> [(f32, f32); 4] {
+            let (adx, ady) = (tip.0 - tail.0, tip.1 - tail.1);
+            let alen = (adx * adx + ady * ady).sqrt().max(f32::EPSILON);
+            let dir = (adx / alen, ady / alen);
+            let perp = (-dir.1, dir.0);
+            let base = (tip.0 - dir.0 * arrow_len, tip.1 - dir.1 * arrow_len);
+            let left = (
+                base.0 + perp.0 * arrow_half_width,
+                base.1 + perp.1 * arrow_half_width,
+            );
+            let right = (
+                base.0 - perp.0 * arrow_half_width,
+                base.1 - perp.1 * arrow_half_width,
+            );
+            let notch = (
+                base.0 + dir.0 * (arrow_concavity as f32 / 100.0 * arrow_len),
+                base.1 + dir.1 * (arrow_concavity as f32 / 100.0 * arrow_len),
+            );
+            [tip, left, notch, right]
+        };
+        let mut arrows: Vec<[(f32, f32); 4]> = Vec::new();
+        if end_arrow {
+            arrows.push(arrowhead((x0, y0), (x1, y1)));
+        }
+        if start_arrow {
+            arrows.push(arrowhead((x1, y1), (x0, y0)));
+        }
+        let (mut min_x, mut max_x) = (x0.min(x1) - half, x0.max(x1) + half);
+        let (mut min_y, mut max_y) = (y0.min(y1) - half, y0.max(y1) + half);
+        for poly in &arrows {
+            for &(vx, vy) in poly {
+                min_x = min_x.min(vx);
+                max_x = max_x.max(vx);
+                min_y = min_y.min(vy);
+                max_y = max_y.max(vy);
+            }
+        }
+        let Ok(bounds) =
+            normalize_selection_bounds(min_x, min_y, max_x, max_y, self.width, self.height)
+        else {
             return Ok(None);
         };
         let selection = self.selection.clone();
@@ -13961,16 +14049,17 @@ impl Document {
         if layer.locked {
             return Err(format!("Layer \"{}\" is locked.", layer.name));
         }
-        let length = len_sq.sqrt();
         for row in bounds.y0..bounds.y1 {
             for col in bounds.x0..bounds.x1 {
                 let (px, py) = (col as f32 + 0.5, row as f32 + 0.5);
+                if selection.as_ref().is_some_and(|s| !s.contains(px, py)) {
+                    continue;
+                }
                 let along = ((px - x0) * dx + (py - y0) * dy) / len_sq;
                 let across = ((px - x0) * dy - (py - y0) * dx).abs() / length;
-                if !(0.0..=1.0).contains(&along)
-                    || across > half
-                    || selection.as_ref().is_some_and(|s| !s.contains(px, py))
-                {
+                let in_line = (0.0..=1.0).contains(&along) && across <= half;
+                let in_arrow = arrows.iter().any(|poly| point_in_polygon(px, py, poly));
+                if !in_line && !in_arrow {
                     continue;
                 }
                 let base = (row as usize * doc_width + col as usize) * CHANNELS;
@@ -40560,6 +40649,131 @@ mod tests {
         doc.set_locked(id, true).unwrap();
         assert!(doc.draw_line(id, 0.0, 2.5, 5.0, 2.5, 1, FILL).is_err());
         assert_eq!(shape_grid(&doc, id), ["....."; 5]);
+    }
+
+    #[test]
+    fn draw_line_with_no_arrows_is_pixel_identical_to_draw_line() {
+        // draw_line_with(..., false, false, ...) must reproduce draw_line
+        // byte-for-byte, the same superset guarantee every other tool's
+        // own _with sibling carries.
+        let (mut doc, id) = blank_5x5();
+        doc.draw_line(id, 0.0, 2.5, 5.0, 2.5, 1, FILL).unwrap();
+        let (mut doc2, id2) = blank_5x5();
+        doc2.draw_line_with(id2, 0.0, 2.5, 5.0, 2.5, 1, FILL, false, false, 300, 200, 0)
+            .unwrap();
+        assert_eq!(shape_grid(&doc, id), shape_grid(&doc2, id2));
+    }
+
+    #[test]
+    fn draw_line_with_end_arrow_paints_a_symmetric_triangle_at_zero_concavity() {
+        // A 1px-weight horizontal line from (1, 4.5) to (6, 4.5) on a 10x9
+        // canvas, end arrow only, 600% width (half-width 3) and 300%
+        // length (3): a symmetric triangle whose tip sits at the line's
+        // own end. Hand-computed and cross-checked against an independent
+        // Python port of point_in_polygon over the same four vertices.
+        let mut doc = Document::new(10, 9).unwrap();
+        let id = doc
+            .add_layer("l", &solid(10, 9, [0, 0, 0, 0]), 10, 9)
+            .unwrap();
+        doc.draw_line_with(id, 1.0, 4.5, 6.0, 4.5, 1, FILL, false, true, 600, 300, 0)
+            .unwrap();
+        assert_eq!(
+            shape_grid(&doc, id),
+            [
+                "..........",
+                "..........",
+                "...F......",
+                "...FF.....",
+                ".FFFFF....",
+                "...FF.....",
+                "...F......",
+                "..........",
+                "..........",
+            ]
+        );
+    }
+
+    #[test]
+    fn draw_line_with_positive_concavity_notches_the_arrowhead_inward() {
+        // The same line and arrowhead as the zero-concavity case, at
+        // +50% concavity: the base's own midpoint pulls toward the tip,
+        // cutting a notch that removes the corner pixel each side kept at
+        // zero concavity.
+        let mut doc = Document::new(10, 9).unwrap();
+        let id = doc
+            .add_layer("l", &solid(10, 9, [0, 0, 0, 0]), 10, 9)
+            .unwrap();
+        doc.draw_line_with(id, 1.0, 4.5, 6.0, 4.5, 1, FILL, false, true, 600, 300, 50)
+            .unwrap();
+        assert_eq!(
+            shape_grid(&doc, id),
+            [
+                "..........",
+                "..........",
+                "...F......",
+                "....F.....",
+                ".FFFFF....",
+                "....F.....",
+                "...F......",
+                "..........",
+                "..........",
+            ]
+        );
+    }
+
+    #[test]
+    fn draw_line_with_negative_concavity_bulges_the_arrowhead_outward() {
+        // The same arrowhead at -50% concavity: the base's own midpoint
+        // pushes away from the tip instead, bulging outward and adding a
+        // pixel each side beyond the zero-concavity case.
+        let mut doc = Document::new(10, 9).unwrap();
+        let id = doc
+            .add_layer("l", &solid(10, 9, [0, 0, 0, 0]), 10, 9)
+            .unwrap();
+        doc.draw_line_with(id, 1.0, 4.5, 6.0, 4.5, 1, FILL, false, true, 600, 300, -50)
+            .unwrap();
+        assert_eq!(
+            shape_grid(&doc, id),
+            [
+                "..........",
+                "..........",
+                "..FF......",
+                "..FFF.....",
+                ".FFFFF....",
+                "..FFF.....",
+                "..FF......",
+                "..........",
+                "..........",
+            ]
+        );
+    }
+
+    #[test]
+    fn draw_line_with_validates_arrow_percentages_and_concavity() {
+        let (mut doc, id) = blank_5x5();
+        assert!(doc
+            .draw_line_with(id, 0.0, 2.5, 5.0, 2.5, 1, FILL, true, false, 9, 100, 0)
+            .is_err());
+        assert!(doc
+            .draw_line_with(id, 0.0, 2.5, 5.0, 2.5, 1, FILL, true, false, 1001, 100, 0)
+            .is_err());
+        assert!(doc
+            .draw_line_with(id, 0.0, 2.5, 5.0, 2.5, 1, FILL, false, true, 100, 9, 0)
+            .is_err());
+        assert!(doc
+            .draw_line_with(id, 0.0, 2.5, 5.0, 2.5, 1, FILL, false, true, 100, 5001, 0)
+            .is_err());
+        assert!(doc
+            .draw_line_with(id, 0.0, 2.5, 5.0, 2.5, 1, FILL, true, false, 100, 100, 51)
+            .is_err());
+        assert!(doc
+            .draw_line_with(id, 0.0, 2.5, 5.0, 2.5, 1, FILL, true, false, 100, 100, -51)
+            .is_err());
+        // Neither arrowhead active: an out-of-range width/length is not
+        // even looked at.
+        assert!(doc
+            .draw_line_with(id, 0.0, 2.5, 5.0, 2.5, 1, FILL, false, false, 9, 9, 0)
+            .is_ok());
     }
 
     #[test]

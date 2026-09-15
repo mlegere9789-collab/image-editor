@@ -3278,6 +3278,12 @@ export default function App() {
   >("pixels");
   // Line tool: the line's weight in pixels; it is painted in the brush colour.
   const [lineWeight, setLineWeight] = useState(1);
+  // Line tool's own Arrowheads: Start/End toggles sharing one width/length/concavity.
+  const [lineStartArrow, setLineStartArrow] = useState(false);
+  const [lineEndArrow, setLineEndArrow] = useState(false);
+  const [lineArrowWidth, setLineArrowWidth] = useState(500);
+  const [lineArrowLength, setLineArrowLength] = useState(1000);
+  const [lineArrowConcavity, setLineArrowConcavity] = useState(0);
   // Polygon tool: the number of sides; the drag runs from the centre to the first vertex.
   const [polygonSides, setPolygonSides] = useState(5);
   // Star tool: the inner points' radius as a percentage of the outer, Photoshop's Star Ratio.
@@ -11458,6 +11464,11 @@ export default function App() {
                 y1,
                 weight: lineWeight,
                 color: [r, g, b, 255],
+                startArrow: lineStartArrow,
+                endArrow: lineEndArrow,
+                arrowWidthPercent: lineArrowWidth,
+                arrowLengthPercent: lineArrowLength,
+                arrowConcavity: lineArrowConcavity,
               });
             } else if (tool === "ellipse") {
               void runCommand("draw_ellipse", {
@@ -11588,6 +11599,11 @@ export default function App() {
       shapeRadius,
       shapeToolMode,
       lineWeight,
+      lineStartArrow,
+      lineEndArrow,
+      lineArrowWidth,
+      lineArrowLength,
+      lineArrowConcavity,
       polygonSides,
       starRatio,
       curveOnImage,
@@ -15302,18 +15318,86 @@ export default function App() {
             </label>
           )}
           {tool === "line" && (
-            <label className="tools__slider">
-              Weight
-              <input
-                type="range"
-                min={1}
-                max={50}
-                value={lineWeight}
-                disabled={!canPaint}
-                onChange={(event) => setLineWeight(Number(event.target.value))}
-              />
-              {lineWeight}px
-            </label>
+            <>
+              <label className="tools__slider">
+                Weight
+                <input
+                  type="range"
+                  min={1}
+                  max={50}
+                  value={lineWeight}
+                  disabled={!canPaint}
+                  onChange={(event) =>
+                    setLineWeight(Number(event.target.value))
+                  }
+                />
+                {lineWeight}px
+              </label>
+              <label className="tools__slider">
+                <input
+                  type="checkbox"
+                  checked={lineStartArrow}
+                  disabled={!canPaint}
+                  onChange={(event) => setLineStartArrow(event.target.checked)}
+                />
+                Start
+              </label>
+              <label className="tools__slider">
+                <input
+                  type="checkbox"
+                  checked={lineEndArrow}
+                  disabled={!canPaint}
+                  onChange={(event) => setLineEndArrow(event.target.checked)}
+                />
+                End
+              </label>
+              {(lineStartArrow || lineEndArrow) && (
+                <>
+                  <label className="tools__slider">
+                    Width
+                    <input
+                      type="range"
+                      min={10}
+                      max={1000}
+                      value={lineArrowWidth}
+                      disabled={!canPaint}
+                      onChange={(event) =>
+                        setLineArrowWidth(Number(event.target.value))
+                      }
+                    />
+                    {lineArrowWidth}%
+                  </label>
+                  <label className="tools__slider">
+                    Length
+                    <input
+                      type="range"
+                      min={10}
+                      max={5000}
+                      value={lineArrowLength}
+                      disabled={!canPaint}
+                      onChange={(event) =>
+                        setLineArrowLength(Number(event.target.value))
+                      }
+                    />
+                    {lineArrowLength}%
+                  </label>
+                  <label className="tools__slider">
+                    Concavity
+                    <input
+                      type="range"
+                      min={-50}
+                      max={50}
+                      value={lineArrowConcavity}
+                      disabled={!canPaint}
+                      onChange={(event) =>
+                        setLineArrowConcavity(Number(event.target.value))
+                      }
+                    />
+                    {lineArrowConcavity}%
+                  </label>
+                </>
+              )}
+            </>
           )}
           {(tool === "rectangle" ||
             tool === "ellipse" ||

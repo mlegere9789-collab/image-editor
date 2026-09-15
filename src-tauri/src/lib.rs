@@ -4725,7 +4725,10 @@ fn draw_ellipse(
     })
 }
 
-/// Line tool (Pixels mode): paint a straight line of a given weight.
+/// Line tool (Pixels mode): paint a straight line of a given weight, with
+/// Photoshop's own Arrowheads — `start_arrow`/`end_arrow` each toggle a
+/// head sharing one width/length/concavity, all defaulting off/typical
+/// when omitted.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 fn draw_line(
@@ -4737,9 +4740,27 @@ fn draw_line(
     y1: f32,
     weight: u32,
     color: [u8; 4],
+    start_arrow: Option<bool>,
+    end_arrow: Option<bool>,
+    arrow_width_percent: Option<u32>,
+    arrow_length_percent: Option<u32>,
+    arrow_concavity: Option<i32>,
 ) -> Result<Snapshot, String> {
     edit(&state, |document| {
-        document.draw_line(id, x0, y0, x1, y1, weight, color)
+        document.draw_line_with(
+            id,
+            x0,
+            y0,
+            x1,
+            y1,
+            weight,
+            color,
+            start_arrow.unwrap_or(false),
+            end_arrow.unwrap_or(false),
+            arrow_width_percent.unwrap_or(50),
+            arrow_length_percent.unwrap_or(100),
+            arrow_concavity.unwrap_or(0),
+        )
     })
 }
 

@@ -24281,6 +24281,62 @@ Tests: 1941 Rust (1936 → 1941), 36 frontend (unchanged — the new controls
 reuse Phase 414's own Fill/Stroke/Position state and need no new test
 file).
 
+## Phase 416 — Line Tool's Arrowheads
+
+LINE TOOL's own row named its last scope cut: Photoshop's Arrowheads —
+Start and End toggles, each drawing a triangular (or kited) head sharing
+one Width, Length, and Concavity — at the line's own ends.
+
+An arrowhead is a four-vertex polygon painted through the same even-odd
+[`point_in_polygon`] the other shape tools already share: the tip sits at
+the line's own endpoint; the base — set back from the tip by Length
+percent of the line's own weight — has two corners offset half of Width
+percent of the weight either way along the line's own perpendicular; and
+the base's own midpoint nudges toward the tip by Concavity percent of the
+arrow's length (away from it for a negative Concavity), the same figure
+Photoshop's own Concavity draws — zero is a plain symmetric triangle,
+positive notches it into a classic dart, negative bulges it into a leaf
+shape. `draw_line`'s own pixel-centre rectangle test is unioned with an
+"inside either active arrowhead's own polygon" test — an arrowhead's own
+base can be wider than the line itself, so painting only the rectangle
+would leave a gap where the two meet.
+
+`draw_line_with` carries the new `start_arrow`/`end_arrow` toggles and
+shared `arrow_width_percent`/`arrow_length_percent`/`arrow_concavity`;
+`draw_line` is unchanged and delegates with both toggles off, the same
+plain-function-delegates-to-`_with`-sibling pattern the last three phases
+have all used. The Tauri command's five new parameters are all optional,
+defaulting to both arrowheads off (Photoshop's own default) and its own
+typical 500%/1000%/0% otherwise; the Line tool's own options bar gained
+Start/End checkboxes and, while either is checked, Width/Length/Concavity
+sliders at Photoshop's own ranges (10-1000%, 10-5000%, -50% to 50%).
+
+**Verified two ways.** Five new hand-computed tests, four of them on a
+10×9 canvas with a 1px-weight horizontal line from `(1, 4.5)` to
+`(6, 4.5)`, every expected grid cross-checked against an independent
+Python port of `point_in_polygon` over the same four vertices:
+`draw_line_with_end_arrow_paints_a_symmetric_triangle_at_zero_concavity`
+— 600% width, 300% length, 0% concavity draws a plain symmetric triangle
+tipped at the line's own end.
+`draw_line_with_positive_concavity_notches_the_arrowhead_inward` — the
+same arrowhead at +50% concavity removes the corner pixel each side kept
+at zero, the base's own midpoint pulled toward the tip.
+`draw_line_with_negative_concavity_bulges_the_arrowhead_outward` — the
+same arrowhead at -50% adds a pixel each side instead, the midpoint
+pushed away from the tip.
+`draw_line_with_no_arrows_is_pixel_identical_to_draw_line` — the same
+superset guarantee every other tool's own `_with` sibling carries.
+`draw_line_with_validates_arrow_percentages_and_concavity` — width,
+length, and concavity each error outside their own range when an
+arrowhead needing them is active, and an out-of-range width/length is not
+even looked at when neither arrowhead is. All 5 pre-existing `line_tool_*`
+tests still pass unmodified. `cargo fmt`/`clippy --all-targets -D
+warnings`/`test` and `npm run build`/`test`/`tsc --noEmit` all clean.
+
+Tests: 1946 Rust (1941 → 1946), 36 frontend (unchanged — the new
+checkboxes and sliders reuse the existing options-bar pattern and need no
+new test file).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
