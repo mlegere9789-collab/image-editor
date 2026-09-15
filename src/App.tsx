@@ -2464,6 +2464,10 @@ export default function App() {
   const [irisBlurBlurRadius, setIrisBlurBlurRadius] = useState(15);
   const [irisBlurAspect, setIrisBlurAspect] = useState(100);
   const [irisBlurRotation, setIrisBlurRotation] = useState(0);
+  const [irisBlurFeatherTop, setIrisBlurFeatherTop] = useState(15);
+  const [irisBlurFeatherRight, setIrisBlurFeatherRight] = useState(15);
+  const [irisBlurFeatherBottom, setIrisBlurFeatherBottom] = useState(15);
+  const [irisBlurFeatherLeft, setIrisBlurFeatherLeft] = useState(15);
   const [showFieldBlurDialog, setShowFieldBlurDialog] = useState(false);
   const [fieldBlurPins, setFieldBlurPins] = useState<
     { x: number; y: number; radius: number }[]
@@ -8823,12 +8827,20 @@ export default function App() {
   const openIrisBlurDialog = useCallback(() => {
     setIrisBlurCenterX(Math.round((document?.width ?? 2) / 2));
     setIrisBlurCenterY(Math.round((document?.height ?? 2) / 2));
+    // Start each of the four feather widths equal to the plain Blur
+    // Radius, the same uniform transition the tool always had before
+    // this phase, letting a caller who never touches the new sliders
+    // see the exact same result as before.
+    setIrisBlurFeatherTop(irisBlurBlurRadius);
+    setIrisBlurFeatherRight(irisBlurBlurRadius);
+    setIrisBlurFeatherBottom(irisBlurBlurRadius);
+    setIrisBlurFeatherLeft(irisBlurBlurRadius);
     setShowIrisBlurDialog(true);
-  }, [document]);
+  }, [document, irisBlurBlurRadius]);
 
   const applyIrisBlur = useCallback(async () => {
     if (selectedId === null) return;
-    await runCommand("iris_blur_with", {
+    await runCommand("iris_blur_feather_with", {
       id: selectedId,
       centerX: irisBlurCenterX,
       centerY: irisBlurCenterY,
@@ -8836,6 +8848,10 @@ export default function App() {
       blurRadius: irisBlurBlurRadius,
       aspect: irisBlurAspect / 100,
       rotation: irisBlurRotation,
+      featherTop: irisBlurFeatherTop,
+      featherRight: irisBlurFeatherRight,
+      featherBottom: irisBlurFeatherBottom,
+      featherLeft: irisBlurFeatherLeft,
     });
     setShowIrisBlurDialog(false);
   }, [
@@ -8847,6 +8863,10 @@ export default function App() {
     irisBlurBlurRadius,
     irisBlurAspect,
     irisBlurRotation,
+    irisBlurFeatherTop,
+    irisBlurFeatherRight,
+    irisBlurFeatherBottom,
+    irisBlurFeatherLeft,
   ]);
 
   const openFieldBlurDialog = useCallback(() => {
@@ -36152,6 +36172,36 @@ export default function App() {
                 }
               />
             </label>
+            {(
+              [
+                ["Feather: Top", irisBlurFeatherTop, setIrisBlurFeatherTop],
+                [
+                  "Feather: Right",
+                  irisBlurFeatherRight,
+                  setIrisBlurFeatherRight,
+                ],
+                [
+                  "Feather: Bottom",
+                  irisBlurFeatherBottom,
+                  setIrisBlurFeatherBottom,
+                ],
+                ["Feather: Left", irisBlurFeatherLeft, setIrisBlurFeatherLeft],
+              ] as const
+            ).map(([label, value, set]) => (
+              <label className="control" key={label}>
+                <span className="control__label">
+                  {label}
+                  <span className="control__value">{value}px</span>
+                </span>
+                <input
+                  type="range"
+                  min={1}
+                  max={100}
+                  value={value}
+                  onChange={(event) => set(Number(event.target.value))}
+                />
+              </label>
+            ))}
             <div className="modal__actions">
               <button
                 className="button button--quiet"

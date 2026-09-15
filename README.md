@@ -24987,6 +24987,67 @@ build`/`npm test` all clean.
 
 Tests: 1964 Rust (1962 → 1964: two new tests), 39 frontend (unchanged).
 
+## Phase 428 — Iris Blur's Four Independent Feather Widths
+
+Phase D's sixth named priority, "the Blur Gallery's interactive
+controls," reopens Iris Blur's own last scope cut: one uniform
+transition width in every direction, where Photoshop's own tool gives
+the feather ring four independently adjustable points — Top, Right,
+Bottom, Left.
+
+`iris_blur_with`'s own per-pixel loop already measured a `distance`
+from centre in the ellipse's own (rotated, aspect-scaled) frame and
+divided by one `blur_radius` to get the blend fraction. The new
+`iris_blur_feather_with` divides by a *direction-dependent* feather
+width instead: at a pixel's own angle `θ` from centre, `feather = cos²θ
+· fu + sin²θ · fv`, where `fu` is `feather_right` or `feather_left`
+depending on which side of centre the pixel falls or, and `fv` is
+`feather_bottom` or `feather_top` the same way. Squared trig weights
+rather than a plain average are what make this exact rather than
+approximate: `cos²θ + sin²θ = 1` identically, so when all four widths
+equal the same value `F`, `feather = F · 1 = F` at every angle,
+reproducing the old single-width formula exactly regardless of where a
+pixel sits — `iris_blur_with` itself is now three lines, calling the
+new sibling with all four equal to `blur_radius`, the established
+plain-function-delegates-to-`_with`-sibling pattern this project has
+used since Hue/Saturation. The blur kernel itself (`blur_radius`, the
+[`box_blur_at`] radius) stays one value, matching Photoshop's own
+separation of one Blur amount slider from the feather ring's own
+independent shape.
+
+Two new hand-computed tests, reusing `iris_blur_keeps_the_centre_
+sharp_and_blurs_outward`'s own already-verified geometry directly:
+narrowing only `feather_top` from the uniform `2` to `1` changes pixel
+(1, 0) — due top of centre, where `cos²θ = 0` and `sin²θ = 1` makes its
+feather exactly `feather_top` alone — from that test's own blended `29`
+to a fully-blurred `38`, its own already-verified raw box-blur average
+at that pixel. Pixel (2, 2), to the bottom-right, is unaffected by the
+top-only change (`cos²θ · feather_right + sin²θ · feather_bottom` never
+reads `feather_top`) and keeps its own uniform-case value, `73`, proving
+the change stays confined to the direction its own handle owns. A
+second test confirms each of the four widths is refused at `0`, the
+same "at least 1 pixel" floor `blur_radius` already enforces. All 5
+pre-existing Iris Blur tests pass unmodified, confirming
+`iris_blur`/`iris_blur_with` are still byte-for-byte the same tool.
+
+Frontend: the Iris Blur dialog gained four new sliders (Feather:
+Top/Right/Bottom/Left, 1–100px), all four reset to the current Blur
+Radius whenever the dialog opens — so a caller who never touches them
+sees exactly the old uniform behaviour — and `applyIrisBlur` now calls
+the new `iris_blur_feather_with` command with all six geometry
+parameters plus the four feather widths. On-canvas dragging of the
+four feather handles remains a documented scope cut: this tool's own
+on-canvas ring already only ever dragged the plain circular radius,
+never the aspect/rotation ellipse it can also draw, so the four new
+widths join aspect and rotation as dialog-only controls rather than
+opening a new numeric-vs-canvas gap. No new frontend pure logic, so the
+frontend test count is unchanged. `cargo fmt`/`clippy --all-targets -D
+warnings`/`test` and `npx tsc --noEmit`/`npm run build`/`npm test` all
+clean.
+
+Tests: 1966 Rust (1964 → 1966: two new tests), 39 frontend
+(unchanged).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

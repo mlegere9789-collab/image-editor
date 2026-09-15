@@ -3285,6 +3285,42 @@ fn iris_blur_with(
     })
 }
 
+/// Blur Gallery > Iris Blur on layer `id` with Photoshop's own four
+/// independently draggable feather handles in place of one uniform
+/// transition width.
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+fn iris_blur_feather_with(
+    state: State<'_, AppState>,
+    id: LayerId,
+    center_x: f32,
+    center_y: f32,
+    radius: f32,
+    blur_radius: u32,
+    aspect: f32,
+    rotation: f32,
+    feather_top: u32,
+    feather_right: u32,
+    feather_bottom: u32,
+    feather_left: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.iris_blur_feather_with(
+            id,
+            center_x,
+            center_y,
+            radius,
+            blur_radius,
+            aspect,
+            rotation,
+            feather_top,
+            feather_right,
+            feather_bottom,
+            feather_left,
+        )
+    })
+}
+
 /// Blur Gallery > Spin Blur on layer `id` with its ellipse and Strobe
 /// Effect.
 #[allow(clippy::too_many_arguments)]
@@ -8787,6 +8823,7 @@ pub fn run() {
             lighting_effects_with,
             tilt_shift_with,
             iris_blur_with,
+            iris_blur_feather_with,
             spin_blur_with,
             reduce_noise_with,
             save_custom_kernel,

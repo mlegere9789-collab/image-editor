@@ -26883,12 +26883,7 @@ impl Document {
     /// and a `blur_radius`-pixel transition beyond it (`blend = (distance
     /// − radius) / blur_radius`, clamped to `0.0..=1.0`), blending toward
     /// a [`box_blur_at`] average by that same fraction per RGB channel;
-    /// alpha untouched. Photoshop's own Iris Blur lets the ellipse be
-    /// stretched and rotated and gives it four independently draggable
-    /// feather handles rather than one uniform ring; this project's own
-    /// circle-only, single-radius version is a documented scope cut, the
-    /// same kind of narrowing [`Self::tilt_shift`]'s own horizontal-only
-    /// band already makes relative to Photoshop's arbitrary-angle one.
+    /// alpha untouched.
     pub fn iris_blur(
         &mut self,
         id: LayerId,
@@ -26917,8 +26912,57 @@ impl Document {
         aspect: f32,
         rotation: f32,
     ) -> Result<Option<Rect>, String> {
+        self.iris_blur_feather_with(
+            id,
+            center_x,
+            center_y,
+            radius,
+            blur_radius,
+            aspect,
+            rotation,
+            blur_radius,
+            blur_radius,
+            blur_radius,
+            blur_radius,
+        )
+    }
+
+    /// [`Self::iris_blur_with`] with Photoshop's own four independently
+    /// draggable feather handles in place of one uniform transition
+    /// width: `feather_top`/`feather_right`/`feather_bottom`/
+    /// `feather_left` are each the transition width, in pixels, along
+    /// that cardinal direction of the ellipse's own (post-rotation,
+    /// post-aspect) frame — `+u` right, `−u` left, `+v` bottom, `−v`
+    /// top, matching the sign `dy` already carries (`row` increasing
+    /// downward). A direction between two cardinals blends their widths
+    /// by `cos²θ`/`sin²θ` (`θ` the angle of that pixel's own offset from
+    /// the centre) rather than a plain average, so all four uniform
+    /// values reduce to exactly the old single `blur_radius` at every
+    /// angle (`cos²θ + sin²θ = 1` identically) — `iris_blur_with` itself
+    /// now just calls this with all four equal to `blur_radius`. The
+    /// blur kernel itself (`blur_radius`, [`box_blur_at`]'s own radius)
+    /// stays one value, exactly as Photoshop's own single Blur amount
+    /// slider is separate from its feather ring's own shape.
+    #[allow(clippy::too_many_arguments)]
+    pub fn iris_blur_feather_with(
+        &mut self,
+        id: LayerId,
+        center_x: f32,
+        center_y: f32,
+        radius: f32,
+        blur_radius: u32,
+        aspect: f32,
+        rotation: f32,
+        feather_top: u32,
+        feather_right: u32,
+        feather_bottom: u32,
+        feather_left: u32,
+    ) -> Result<Option<Rect>, String> {
         if blur_radius == 0 {
             return Err("Iris Blur blur radius must be at least 1 pixel.".to_string());
+        }
+        if [feather_top, feather_right, feather_bottom, feather_left].contains(&0) {
+            return Err("Iris Blur feather widths must be at least 1 pixel.".to_string());
         }
         if !center_x.is_finite() || !center_y.is_finite() || !radius.is_finite() || radius < 0.0 {
             return Err(
@@ -26954,7 +26998,24 @@ impl Document {
                 let u = dx * cos + dy * sin;
                 let v = (-dx * sin + dy * cos) / aspect;
                 let distance = (u * u + v * v).sqrt();
-                let blend = ((distance - radius) / blur_radius as f32).clamp(0.0, 1.0);
+                let feather = if distance > 0.0 {
+                    let cos2 = (u / distance).powi(2);
+                    let sin2 = (v / distance).powi(2);
+                    let fu = if u >= 0.0 {
+                        feather_right
+                    } else {
+                        feather_left
+                    } as f32;
+                    let fv = if v >= 0.0 {
+                        feather_bottom
+                    } else {
+                        feather_top
+                    } as f32;
+                    cos2 * fu + sin2 * fv
+                } else {
+                    1.0
+                };
+                let blend = ((distance - radius) / feather).clamp(0.0, 1.0);
                 let blurred = box_blur_at(&source, doc_width, width, height, row, col, r);
                 let dst = (row as usize * doc_width + col as usize) * CHANNELS;
                 for c in 0..3 {
@@ -54511,6 +54572,57 @@ mod tests {
         let before = doc.layers()[0].pixels.clone();
         doc.iris_blur(id, 1.0, 1.0, 2.0, 2).unwrap();
         assert_eq!(doc.layers()[0].pixels, before);
+    }
+
+    #[test]
+    fn iris_blur_feather_narrows_the_transition_only_in_the_direction_its_own_handle_owns() {
+        // Same ramped_3x3, centre and radius-0/blur-radius-2 setup as
+        // `iris_blur_keeps_the_centre_sharp_and_blurs_outward` above,
+        // whose own hand-computed values this test reuses directly:
+        // pixel (1, 0) sits distance 1 due top, blending 20 with its own
+        // box-blur average 38 at the uniform feather 2 for a final 29;
+        // pixel (2, 2) sits distance sqrt(2) to the bottom-right,
+        // blending 90 with its own average 66 for a final 73.
+        //
+        // Narrowing only feather_top to 1 (right/bottom/left stay 2, the
+        // uniform blur_radius) changes pixel (1, 0)'s own feather --
+        // cos²θ = 0, sin²θ = 1 for a pixel due top, so its feather is
+        // exactly feather_top alone -- from 2 to 1: blend = (1 − 0) / 1 =
+        // 1.0, fully blurred, landing on the raw average 38 instead of
+        // 29. Pixel (2, 2) is unaffected: cos²θ · feather_right + sin²θ
+        // · feather_bottom = cos²θ · 2 + sin²θ · 2 = 2 regardless of
+        // feather_top, so it keeps its own uniform-case value, 73,
+        // proving the change is confined to the direction its own
+        // handle owns.
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        doc.iris_blur_feather_with(id, 1.0, 1.0, 0.0, 2, 1.0, 0.0, 1, 2, 2, 2)
+            .unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(p[idx(1, 0)], 38);
+        assert_eq!(p[idx(2, 2)], 73);
+        assert_eq!(
+            p[idx(1, 1)],
+            50,
+            "still sharp at the centre, radius 0 or not"
+        );
+    }
+
+    #[test]
+    fn iris_blur_feather_rejects_a_zero_width_handle() {
+        let (mut doc, id) = ramped_3x3();
+        assert!(doc
+            .iris_blur_feather_with(id, 1.0, 1.0, 0.0, 2, 1.0, 0.0, 0, 2, 2, 2)
+            .is_err());
+        assert!(doc
+            .iris_blur_feather_with(id, 1.0, 1.0, 0.0, 2, 1.0, 0.0, 2, 0, 2, 2)
+            .is_err());
+        assert!(doc
+            .iris_blur_feather_with(id, 1.0, 1.0, 0.0, 2, 1.0, 0.0, 2, 2, 0, 2)
+            .is_err());
+        assert!(doc
+            .iris_blur_feather_with(id, 1.0, 1.0, 0.0, 2, 1.0, 0.0, 2, 2, 2, 0)
+            .is_err());
     }
 
     #[test]
