@@ -24004,14 +24004,22 @@ impl Document {
         })
     }
 
-    /// Layer > Layer Style > Stroke with its Position, baked in
-    /// destructively. Outside: a transparent pixel within `size` (Chebyshev
-    /// distance) of an opaque one becomes the stroke colour at the
-    /// opacity, as [`Self::stroke_outline`] paints. Inside: an opaque
-    /// pixel within `size` of a transparent one is blended toward the
-    /// colour by the opacity, its alpha kept. Center: `size / 2` (rounded
-    /// down) outside and the rest inside, so an odd size leans in. Blend
-    /// Mode remains a documented scope cut. See README Phase 353.
+    /// Layer > Layer Style > Stroke with its Position and Blend Mode,
+    /// baked in destructively. Outside: a transparent pixel within `size`
+    /// (Chebyshev distance) of an opaque one becomes the stroke colour at
+    /// the opacity, as [`Self::stroke_outline`] paints. Inside: an opaque
+    /// pixel within `size` of a transparent one runs the stroke colour
+    /// through `blend_mode.blend(Cb, Cs)` before the opacity mixes toward
+    /// that result, its alpha kept — the same narrowing
+    /// [`Self::color_overlay_with`] and [`Self::satin_with`] already make
+    /// for their own layer styles; `BlendMode::Normal` collapses this back
+    /// to the original flat mix. Center: `size / 2` (rounded down) outside
+    /// and the rest inside, so an odd size leans in. Outside's own stroke
+    /// pixels are painted fresh over transparency, so Blend Mode (which
+    /// only has meaning against an existing colour) applies to the Inside
+    /// and Center portions only, exactly as Photoshop's own Stroke does
+    /// for a fully-transparent destination. See README Phases 353 and
+    /// 395.
     pub fn stroke_outline_with(
         &mut self,
         id: LayerId,
@@ -24019,6 +24027,7 @@ impl Document {
         position: StrokePosition,
         color: [u8; 3],
         opacity: u32,
+        blend_mode: BlendMode,
     ) -> Result<Option<Rect>, String> {
         if !(1..=250).contains(&size) {
             return Err("Stroke size must be between 1 and 250.".to_string());
@@ -24047,9 +24056,9 @@ impl Document {
             if inside > 0 && bevel_distance(src, w, h, x, y, inside + 1, true) <= inside {
                 let mut out = px;
                 for c in 0..3 {
-                    out[c] = (px[c] as f32 + (color[c] as f32 - px[c] as f32) * frac)
-                        .round()
-                        .clamp(0.0, 255.0) as u8;
+                    let cb = to_unit(px[c]);
+                    let blended = blend_mode.blend(cb, to_unit(color[c]));
+                    out[c] = to_byte(cb * (1.0 - frac) + blended * frac);
                 }
                 return out;
             }
@@ -49485,15 +49494,29 @@ mod tests {
         // Inside, size 1: the block's own (2, 2) takes the colour, its
         // alpha kept; the transparent (1, 1) stays.
         let (mut doc, id) = stroke_outline_fixture();
-        doc.stroke_outline_with(id, 1, StrokePosition::Inside, [255, 0, 0], 100)
-            .unwrap();
+        doc.stroke_outline_with(
+            id,
+            1,
+            StrokePosition::Inside,
+            [255, 0, 0],
+            100,
+            BlendMode::Normal,
+        )
+        .unwrap();
         let p = &doc.layers()[0].pixels;
         assert_eq!(&p[idx(2, 2)..idx(2, 2) + 4], [255, 0, 0, 255]);
         assert_eq!(&p[idx(1, 1)..idx(1, 1) + 4], [0, 0, 0, 0]);
         // Inside at 50 % blends: 100 + 155 * 0.5 = 177.5 -> 178, 75, 100.
         let (mut doc, id) = stroke_outline_fixture();
-        doc.stroke_outline_with(id, 1, StrokePosition::Inside, [255, 0, 0], 50)
-            .unwrap();
+        doc.stroke_outline_with(
+            id,
+            1,
+            StrokePosition::Inside,
+            [255, 0, 0],
+            50,
+            BlendMode::Normal,
+        )
+        .unwrap();
         assert_eq!(
             &doc.layers()[0].pixels[idx(2, 2)..idx(2, 2) + 4],
             [178, 75, 100, 255]
@@ -49501,32 +49524,99 @@ mod tests {
         // Outside matches stroke_outline exactly.
         let (mut a, id_a) = stroke_outline_fixture();
         let (mut b, id_b) = stroke_outline_fixture();
-        a.stroke_outline_with(id_a, 2, StrokePosition::Outside, [255, 0, 0], 100)
-            .unwrap();
+        a.stroke_outline_with(
+            id_a,
+            2,
+            StrokePosition::Outside,
+            [255, 0, 0],
+            100,
+            BlendMode::Normal,
+        )
+        .unwrap();
         b.stroke_outline(id_b, 2, [255, 0, 0], 100).unwrap();
         assert_eq!(a.layers()[0].pixels, b.layers()[0].pixels);
         // Center, size 2: one out, one in. (1, 1) and (2, 2) both take the
         // colour; (0, 0), two out, does not.
         let (mut doc, id) = stroke_outline_fixture();
-        doc.stroke_outline_with(id, 2, StrokePosition::Center, [255, 0, 0], 100)
-            .unwrap();
+        doc.stroke_outline_with(
+            id,
+            2,
+            StrokePosition::Center,
+            [255, 0, 0],
+            100,
+            BlendMode::Normal,
+        )
+        .unwrap();
         let p = &doc.layers()[0].pixels;
         assert_eq!(&p[idx(1, 1)..idx(1, 1) + 4], [255, 0, 0, 255]);
         assert_eq!(&p[idx(2, 2)..idx(2, 2) + 4], [255, 0, 0, 255]);
         assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [0, 0, 0, 0]);
         // Center, size 1: nothing out, one in.
         let (mut doc, id) = stroke_outline_fixture();
-        doc.stroke_outline_with(id, 1, StrokePosition::Center, [255, 0, 0], 100)
-            .unwrap();
+        doc.stroke_outline_with(
+            id,
+            1,
+            StrokePosition::Center,
+            [255, 0, 0],
+            100,
+            BlendMode::Normal,
+        )
+        .unwrap();
         let p = &doc.layers()[0].pixels;
         assert_eq!(&p[idx(1, 1)..idx(1, 1) + 4], [0, 0, 0, 0]);
         assert_eq!(&p[idx(2, 2)..idx(2, 2) + 4], [255, 0, 0, 255]);
         assert!(doc
-            .stroke_outline_with(id, 0, StrokePosition::Inside, [255, 0, 0], 100)
+            .stroke_outline_with(
+                id,
+                0,
+                StrokePosition::Inside,
+                [255, 0, 0],
+                100,
+                BlendMode::Normal
+            )
             .is_err());
         assert!(doc
-            .stroke_outline_with(id, 1, StrokePosition::Inside, [255, 0, 0], 101)
+            .stroke_outline_with(
+                id,
+                1,
+                StrokePosition::Inside,
+                [255, 0, 0],
+                101,
+                BlendMode::Normal
+            )
             .is_err());
+    }
+
+    #[test]
+    fn stroke_outline_with_multiply_blends_the_inside_stroke_colour_first() {
+        // Same fixture and geometry as the positions test's own Inside,
+        // size 1, full-opacity case (own = [100, 150, 200] at (2, 2)), but
+        // through Multiply against red (255, 0, 0) instead of Normal.
+        // Multiply's own B(Cb, Cs) = Cb * Cs: red's own Cs = 255/255 =
+        // 1.0, so R is left exactly as it started (100) instead of
+        // Normal's own full-opacity behaviour, which replaces it outright
+        // (stroke_outline_with_positions_the_stroke_inside_outside_or_centred,
+        // above, replaces every channel with the colour at opacity 100).
+        // G and B's own Cs = 0, so Cb * 0 = 0 regardless of the original
+        // value: both collapse to 0, same as Normal's full-opacity case
+        // would give for those two channels (0 either way, for different
+        // reasons). Outside stays untouched by this fixture's own size-1
+        // Inside geometry, so this only exercises the blended branch.
+        let idx = |x: usize, y: usize| (y * 6 + x) * 4;
+        let (mut doc, id) = stroke_outline_fixture();
+        doc.stroke_outline_with(
+            id,
+            1,
+            StrokePosition::Inside,
+            [255, 0, 0],
+            100,
+            BlendMode::Multiply,
+        )
+        .unwrap();
+        assert_eq!(
+            &doc.layers()[0].pixels[idx(2, 2)..idx(2, 2) + 4],
+            [100, 0, 0, 255]
+        );
     }
 
     fn gradient_options() -> GradientOverlayOptions {

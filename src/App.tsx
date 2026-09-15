@@ -2017,6 +2017,8 @@ export default function App() {
   const [strokeOutlinePosition, setStrokeOutlinePosition] = useState<
     "outside" | "inside" | "center"
   >("outside");
+  const [strokeOutlineBlendMode, setStrokeOutlineBlendMode] =
+    useState<BlendMode>("normal");
   const [showColorOverlayDialog, setShowColorOverlayDialog] = useState(false);
   const [colorOverlayColor, setColorOverlayColor] = useState("#ff0000");
   const [colorOverlayOpacity, setColorOverlayOpacity] = useState(100);
@@ -6216,6 +6218,7 @@ export default function App() {
       position: strokeOutlinePosition,
       color: [r, g, b],
       opacity: strokeOutlineOpacity,
+      blendMode: strokeOutlineBlendMode,
     });
     setShowStrokeOutlineDialog(false);
   }, [
@@ -6225,6 +6228,7 @@ export default function App() {
     strokeOutlinePosition,
     strokeOutlineColor,
     strokeOutlineOpacity,
+    strokeOutlineBlendMode,
   ]);
 
   const applyColorOverlay = useCallback(async () => {
@@ -25199,6 +25203,21 @@ export default function App() {
                 value={strokeOutlineColor}
                 onChange={(event) => setStrokeOutlineColor(event.target.value)}
               />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Blend Mode</span>
+              <select
+                value={strokeOutlineBlendMode}
+                onChange={(event) =>
+                  setStrokeOutlineBlendMode(event.target.value as BlendMode)
+                }
+              >
+                {blendModes.map((info) => (
+                  <option key={info.mode} value={info.mode}>
+                    {info.label}
+                  </option>
+                ))}
+              </select>
             </label>
             <label className="control">
               <span className="control__label">

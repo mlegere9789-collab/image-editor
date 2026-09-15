@@ -23188,6 +23188,45 @@ Overlay, Pattern Overlay, and now Satin all reach every blend mode through
 their own `_with` sibling, with the plain function kept exactly as-is for
 callers that only ever wanted Normal.
 
+## Phase 395 — Stroke's Blend Mode
+
+Stroke's own "Blend Mode... documented scope cut" line was the next
+largest-impact item in `docs/PLAN_TO_100.md`'s Phase D backlog, and the
+same narrowing again: `stroke_outline_with` (added in Phase 353 for
+Position) widened in place to take `blend_mode: BlendMode` directly,
+rather than growing a third function — it was already the richer
+`_with` sibling every caller uses, so this follows Phase 392's own
+precedent of widening an existing richer entry point instead of adding a
+new one. The Inside and Center portions' own per-pixel mix now runs the
+stroke colour through `blend_mode.blend(Cb, Cs)` before Opacity mixes
+toward that result, exactly the shape Color Overlay, Gradient Overlay,
+Pattern Overlay, and Satin already use; `BlendMode::Normal` collapses it
+back to the original flat mix. The Outside portion paints fresh over
+transparency and has no existing colour to blend against, so — as in
+Photoshop itself — Blend Mode only has an effect on Inside and Center;
+`stroke_outline` (the older, Outside-only, Position-less function) is
+untouched. `stroke_outline_with`'s Tauri command widened to take
+`blendMode` directly; the dialog gained a Blend Mode dropdown between
+Color and Opacity.
+
+**Verified.** All 6 pre-existing Stroke tests (5 for `stroke_outline`,
+unmodified, plus `stroke_outline_with_positions_the_stroke_inside_outside_or_centred`,
+updated only to pass `BlendMode::Normal` explicitly) still pass
+byte-for-byte — including its own hand-computed Inside-at-50%-opacity
+case (own `[100, 150, 200]` toward red at size 1, opacity 50, giving
+`[178, 75, 100]`), proving zero behaviour change. One new
+hand-computed test, `stroke_outline_with_multiply_blends_the_inside_stroke_colour_first`,
+reuses that same fixture and geometry against red through Multiply
+instead of Normal: Multiply's `B(Cb, Cs) = Cb · Cs` leaves R exactly as
+it started (100, red's own `Cs = 1.0`) while G and B both collapse to 0
+(their own `Cs = 0`) — a real, contrasting result against that same
+fixture's Normal full-opacity case, which replaces every channel with
+the colour outright. `cargo fmt`/`clippy --all-targets -D warnings`/
+`test` and `npm run build`/`test`/`tsc --noEmit` all clean.
+
+Tests: 1908 Rust (1907 → 1908), 33 frontend (unchanged — one dropdown,
+same pattern as the prior four phases').
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

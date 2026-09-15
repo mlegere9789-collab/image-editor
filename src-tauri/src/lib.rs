@@ -6557,9 +6557,10 @@ fn texturizer_with(
     })
 }
 
-/// Layer > Layer Style > Stroke with its Position -- see
+/// Layer > Layer Style > Stroke with its Position and Blend Mode -- see
 /// `Document::stroke_outline_with`.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 fn stroke_outline_with(
     state: State<'_, AppState>,
     id: LayerId,
@@ -6567,9 +6568,10 @@ fn stroke_outline_with(
     position: document::StrokePosition,
     color: [u8; 3],
     opacity: u32,
+    blend_mode: BlendMode,
 ) -> Result<Snapshot, String> {
     edit_checkpointed(&state, |document| {
-        document.stroke_outline_with(id, size, position, color, opacity)
+        document.stroke_outline_with(id, size, position, color, opacity, blend_mode)
     })
 }
 
