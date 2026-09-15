@@ -5957,8 +5957,8 @@ clear_amount, seed)`: `graininess` (Photoshop's own `0..=10` range)
 scales a seeded `XorShift32` draw added to each pixel's own standard-
 weighted luma before the glow calculation, `draw \* (graininess / 10.0
 
-- 64.0)`— the same per-pixel draw`note_paper`and`reticulation`already use;`glow_amount`and`clear_amount`(both Photoshop's own`0..=20`range) combine into a single glow strength,`(glow_amount /
-  20.0) _ (1.0 - clear_amount / 20.0) _ (grained_luma / 255.0)`, clamped
+- 64.0)`— the same per-pixel draw`note*paper`and`reticulation`already use;`glow_amount`and`clear_amount`(both Photoshop's own`0..=20`range) combine into a single glow strength,`(glow_amount /
+  20.0) * (1.0 - clear*amount / 20.0) * (grained_luma / 255.0)`, clamped
 to `0.0..=1.0`—`clear_amount`scales the overall strength down
 rather than Photoshop's own more nuanced clipping of the glow's own
 tone range, a documented simplification. Each RGB channel is pushed
@@ -22878,6 +22878,50 @@ against the real backend, not a stub.
 
 Tests: 1894 Rust (unchanged — no backend command changed shape), 33
 frontend (30 → 33).
+
+## Phase 387 — the Brush tool's Color Dynamics
+
+The Brush Tool row's last remaining scope cut but one: Color Dynamics,
+Photoshop's Brush Settings section that varies each dab's own colour rather
+than laying the whole stroke down flat. `BrushDynamics` gains
+Foreground/Background Jitter (mixes toward a background swatch by a
+jittered fraction), Hue/Saturation/Brightness Jitter (each perturbs the
+mixed colour's own HSL by up to that percent of its full range), and
+Purity (scales the result's saturation toward or away from grey, applied
+once rather than jittered — Photoshop pairs a jitter checkbox with every
+other slider here but not this one). `Document::dab_color` computes it: at
+every jitter and Purity zero it is the flat foreground colour back out
+byte for byte (an early return skips the HSL round trip entirely, so no
+stray rounding ever touches a plain stroke); otherwise it draws from its
+own `XorShift32` stream, seeded off `BrushDynamics::seed` but XORed to a
+distinct sequence from `dab_plan`'s own, so a stroke's size/angle/opacity
+draws are unaffected by whether colour jitter is also on. `stroke_inner`'s
+coverage pass now tracks, only when Color Dynamics is actually active and
+only for the plain `Stroke::Brush`, which dab's colour won the max-coverage
+contest at each pixel — a parallel array to the existing coverage grid — so
+overlapping dabs of different jittered colours still composite correctly.
+The dialog's own array-driven sliders gain five new rows plus a background
+colour swatch; every other stroke kind (Eraser, Clone, Pattern Stamp, the
+rest) is entirely unaffected — Color Dynamics has never been a property of
+whichever tool merely reuses the same dab-placement machinery.
+
+**Verified.** Two new Rust tests, hand-computed. The first paints a stroke
+with every Color Dynamics field at its default zero and asserts every
+single painted pixel is the exact input RGB, byte for byte — the fast path
+that must hold for every one of the thousands of existing brush strokes
+already shipped, none of which set these fields. The second: the same
+seed reproduces a jittered stroke byte for byte, a different seed produces
+a different stroke, and at least one painted pixel differs from the flat
+foreground colour (jitter is actually happening, not a no-op); Purity −100
+drives every painted pixel to equal R=G=B (full grey) regardless of what
+hue/saturation/brightness jitter drew; five out-of-range settings
+(Foreground/Background, Hue, Saturation and Brightness Jitter over 100,
+Purity below −100) are all refused. `cargo fmt`/`clippy --all-targets -D
+warnings`/`test` and `npm run build`/`test` all clean.
+
+Tests: 1896 Rust (1894 → 1896), 33 frontend (unchanged — no new frontend
+logic worth a unit test, just wiring five sliders and a colour input
+already-tested code already reads).
 
 ## Prerequisites
 

@@ -487,6 +487,12 @@ export type BrushDynamics = {
   opacityJitter: number;
   hardness: number;
   seed: number;
+  fgBgJitter: number;
+  backgroundColor: [number, number, number];
+  hueJitter: number;
+  saturationJitter: number;
+  brightnessJitter: number;
+  purity: number;
 };
 
 /** Mirrors `Interpolation` in src-tauri/src/document.rs: a transform's resampling. */

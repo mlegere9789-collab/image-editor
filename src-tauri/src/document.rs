@@ -2662,6 +2662,23 @@ pub struct BrushDynamics {
     pub opacity_jitter: u8,
     pub hardness: u8,
     pub seed: u32,
+    /// Color Dynamics, Brush Settings' own remaining scope cut, closed
+    /// here: `fg_bg_jitter` mixes each dab's colour toward
+    /// `background_color` by a jittered fraction of the way there, then
+    /// `hue_jitter`/`saturation_jitter`/`brightness_jitter` each perturb
+    /// that mixed colour's own HSL by up to that percent of its full
+    /// range, and `purity` finally scales the result's saturation toward
+    /// (positive) or away from (negative) grey -- applied once, not
+    /// jittered, exactly as Photoshop pairs a jitter checkbox with every
+    /// other slider here but not this one. All zero (and `purity` zero)
+    /// is the plain foreground colour, byte for byte -- see
+    /// [`Document::dab_color`].
+    pub fg_bg_jitter: u8,
+    pub background_color: [u8; 3],
+    pub hue_jitter: u8,
+    pub saturation_jitter: u8,
+    pub brightness_jitter: u8,
+    pub purity: i8,
 }
 
 impl Default for BrushDynamics {
@@ -2680,6 +2697,12 @@ impl Default for BrushDynamics {
             opacity_jitter: 0,
             hardness: 100,
             seed: 0,
+            fg_bg_jitter: 0,
+            background_color: [0, 0, 0],
+            hue_jitter: 0,
+            saturation_jitter: 0,
+            brightness_jitter: 0,
+            purity: 0,
         }
     }
 }
@@ -2697,6 +2720,10 @@ impl BrushDynamics {
             ("Count Jitter", self.count_jitter),
             ("Opacity Jitter", self.opacity_jitter),
             ("Hardness", self.hardness),
+            ("Foreground/Background Jitter", self.fg_bg_jitter),
+            ("Hue Jitter", self.hue_jitter),
+            ("Saturation Jitter", self.saturation_jitter),
+            ("Brightness Jitter", self.brightness_jitter),
         ] {
             if value > 100 {
                 return Err(format!("{name} must be between 0 and 100 percent."));
@@ -2710,6 +2737,9 @@ impl BrushDynamics {
         }
         if self.count == 0 || self.count > 16 {
             return Err("Count must be between 1 and 16.".to_string());
+        }
+        if !(-100..=100).contains(&self.purity) {
+            return Err("Purity must be between -100 and 100 percent.".to_string());
         }
         Ok(())
     }
@@ -2818,6 +2848,43 @@ fn dab_coverage(dab: &Dab, hardness: u8, px: f32, py: f32) -> f32 {
         (r - d + 0.5).clamp(0.0, 1.0)
     };
     c * dab.opacity
+}
+
+/// Color Dynamics: one dab's own colour, drawn from `rng` rather than the
+/// stroke's flat foreground colour. `fg_bg_jitter` first mixes `foreground`
+/// toward `dynamics.background_color` by a jittered fraction of the way
+/// there; `hue_jitter`/`saturation_jitter`/`brightness_jitter` then each
+/// perturb that mixed colour's own HSL by up to that percent of its full
+/// range (a full 360° hue swing, or the full 0..1 saturation/lightness
+/// range, at 100%); `purity` finally scales the result's saturation toward
+/// (positive) or away from (negative) grey, applied once rather than
+/// jittered -- Photoshop pairs a jitter checkbox with every other slider
+/// here but not this one. With every jitter and `purity` at zero this is
+/// `foreground` back out byte for byte (the HSL round trip is exact at the
+/// identity transform: no rounding is introduced when nothing moves).
+fn dab_color(foreground: [u8; 3], dynamics: &BrushDynamics, rng: &mut XorShift32) -> [u8; 3] {
+    let unit = |rng: &mut XorShift32| (rng.next_unit() + 1.0) / 2.0;
+    let mix_t = unit(rng) * dynamics.fg_bg_jitter as f32 / 100.0;
+    let lerp = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * mix_t).round() as u8;
+    let mixed = [
+        lerp(foreground[0], dynamics.background_color[0]),
+        lerp(foreground[1], dynamics.background_color[1]),
+        lerp(foreground[2], dynamics.background_color[2]),
+    ];
+    if dynamics.hue_jitter == 0
+        && dynamics.saturation_jitter == 0
+        && dynamics.brightness_jitter == 0
+        && dynamics.purity == 0
+    {
+        return mixed;
+    }
+    let (h, s, l) = rgb_to_hsl(mixed[0], mixed[1], mixed[2]);
+    let h = (h + rng.next_unit() * 180.0 * dynamics.hue_jitter as f32 / 100.0).rem_euclid(360.0);
+    let s = (s + rng.next_unit() * dynamics.saturation_jitter as f32 / 100.0).clamp(0.0, 1.0);
+    let l = (l + rng.next_unit() * dynamics.brightness_jitter as f32 / 100.0).clamp(0.0, 1.0);
+    let s = (s * (1.0 + dynamics.purity as f32 / 100.0)).clamp(0.0, 1.0);
+    let (r, g, b) = hsl_to_rgb(h, s, l);
+    [r, g, b]
 }
 
 /// One anchor of a Bézier path — Photoshop's path point: its position
@@ -19307,8 +19374,31 @@ impl Document {
         };
 
         let mut coverage = vec![0f32; box_width * box_height];
+        // Color Dynamics: only meaningful for the plain Brush stroke, and
+        // only actually computed when some jitter or Purity is set --
+        // dab_color's own fast path already returns the flat colour
+        // untouched at all zero, but skipping it here too avoids drawing
+        // from `color_rng` at all for the overwhelming majority of
+        // strokes, which use no Color Dynamics.
+        let color_dynamics_active = dynamics.is_some_and(|d| {
+            d.fg_bg_jitter > 0 || d.hue_jitter > 0 || d.saturation_jitter > 0 || d.purity != 0
+        });
+        let brush_foreground = match stroke {
+            Stroke::Brush { color } if color_dynamics_active => {
+                Some([color[0], color[1], color[2]])
+            }
+            _ => None,
+        };
+        let mut dab_colors: Option<Vec<[u8; 3]>> =
+            brush_foreground.map(|_| vec![[0u8; 3]; box_width * box_height]);
         if let Some(dynamics) = dynamics {
+            // A separate stream from `dab_plan`'s own internal generator
+            // (which is seeded and consumed entirely inside that call) --
+            // XORing the seed keeps this reproducible without the two
+            // ever drawing from the same sequence.
+            let mut color_rng = XorShift32::new(dynamics.seed ^ 0x5bd1_e995);
             for dab in dab_plan(points, radius, dynamics) {
+                let dab_color = brush_foreground.map(|fg| dab_color(fg, dynamics, &mut color_rng));
                 let r = dab.radius + 1.0;
                 let row_range = ((dab.y - r).floor().max(y0 as f32) as usize)
                     ..(((dab.y + r).ceil().max(0.0) as usize).min(y1 as usize));
@@ -19324,10 +19414,13 @@ impl Document {
                         if let Some(selection) = &selection {
                             c *= selection.coverage(cx, cy);
                         }
-                        let slot =
-                            &mut coverage[(py - y0 as usize) * box_width + (px - x0 as usize)];
+                        let idx = (py - y0 as usize) * box_width + (px - x0 as usize);
+                        let slot = &mut coverage[idx];
                         if c > *slot {
                             *slot = c;
+                            if let (Some(colors), Some(dc)) = (&mut dab_colors, dab_color) {
+                                colors[idx] = dc;
+                            }
                         }
                     }
                 }
@@ -19499,7 +19592,16 @@ impl Document {
                 }
                 let base = ((y0 as usize + row) * width as usize + (x0 as usize + col)) * CHANNELS;
                 let (color, source_alpha) = match stroke {
-                    Stroke::Brush { color } => (color, to_unit(color[3]) * c),
+                    Stroke::Brush { color } => {
+                        let color = match &dab_colors {
+                            Some(colors) => {
+                                let [r, g, b] = colors[row * box_width + col];
+                                [r, g, b, color[3]]
+                            }
+                            None => color,
+                        };
+                        (color, to_unit(color[3]) * c)
+                    }
                     Stroke::PatternStamp { opacity } => {
                         let pattern = pattern.as_ref().expect("checked above");
                         let px = (x0 as usize + col) % pattern.width as usize;
@@ -52899,6 +53001,146 @@ mod tests {
             .collect();
         assert_eq!(painted_row.len(), 5, "{painted_row:?}");
         assert!((0..30u32).all(|y| y == 5 || pixel(&d, target, 20, y)[3] == 0));
+    }
+
+    #[test]
+    fn color_dynamics_at_all_zero_is_the_plain_foreground_colour() {
+        let red = [200, 40, 40, 255];
+        let points = [(10.0, 30.0), (50.0, 30.0)];
+        let mut plain = Document::new(60, 60).unwrap();
+        let a = plain
+            .add_layer("a", &[0; 60 * 60 * CHANNELS], 60, 60)
+            .unwrap();
+        plain
+            .stroke_dynamic(
+                a,
+                &points,
+                6.0,
+                Stroke::Brush { color: red },
+                &BrushDynamics {
+                    seed: 42,
+                    ..BrushDynamics::default()
+                },
+            )
+            .unwrap();
+        // Every painted pixel is exactly `red` -- the fast path in
+        // `dab_color`, and `color_dynamics_active` skipping the whole
+        // mechanism, both have to hold for this (a lossy HSL round trip
+        // at the identity would drift a channel by a byte here or there).
+        for y in 0..60u32 {
+            for x in 0..60u32 {
+                let p = pixel(&plain, a, x, y);
+                if p[3] > 0 {
+                    assert_eq!([p[0], p[1], p[2]], [red[0], red[1], red[2]], "at ({x},{y})");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn color_dynamics_jitters_colour_reproducibly_and_purity_desaturates() {
+        let fg = [220, 30, 30, 255];
+        let bg = [30, 30, 220];
+        let points = [(10.0, 30.0), (50.0, 30.0)];
+        let fresh = || {
+            let mut doc = Document::new(60, 60).unwrap();
+            let id = doc
+                .add_layer("x", &[0; 60 * 60 * CHANNELS], 60, 60)
+                .unwrap();
+            (doc, id)
+        };
+        let painted_colors = |doc: &Document, id: LayerId| -> Vec<[u8; 3]> {
+            (0..60u32)
+                .flat_map(|y| (0..60u32).map(move |x| (x, y)))
+                .filter_map(|(x, y)| {
+                    let p = pixel(doc, id, x, y);
+                    (p[3] > 0).then_some([p[0], p[1], p[2]])
+                })
+                .collect()
+        };
+        let dynamics = BrushDynamics {
+            fg_bg_jitter: 100,
+            background_color: bg,
+            hue_jitter: 60,
+            saturation_jitter: 40,
+            brightness_jitter: 40,
+            seed: 9,
+            ..BrushDynamics::default()
+        };
+        // Same seed reproduces byte for byte; a different seed differs
+        // somewhere, and the result is not just the flat foreground colour
+        // repeated everywhere (jitter is actually happening).
+        let (mut d1, i1) = fresh();
+        d1.stroke_dynamic(i1, &points, 6.0, Stroke::Brush { color: fg }, &dynamics)
+            .unwrap();
+        let (mut d2, i2) = fresh();
+        d2.stroke_dynamic(i2, &points, 6.0, Stroke::Brush { color: fg }, &dynamics)
+            .unwrap();
+        assert_eq!(d1.layers()[0].pixels, d2.layers()[0].pixels);
+        let (mut d3, i3) = fresh();
+        d3.stroke_dynamic(
+            i3,
+            &points,
+            6.0,
+            Stroke::Brush { color: fg },
+            &BrushDynamics {
+                seed: 10,
+                ..dynamics
+            },
+        )
+        .unwrap();
+        assert_ne!(d1.layers()[0].pixels, d3.layers()[0].pixels);
+        let colors1 = painted_colors(&d1, i1);
+        assert!(!colors1.is_empty());
+        assert!(
+            colors1.iter().any(|&c| c != [fg[0], fg[1], fg[2]]),
+            "at least one dab actually jittered away from the flat foreground"
+        );
+        // Purity at -100 drives every dab fully to grey (saturation 0),
+        // whatever the other jitters draw -- every channel equal.
+        let (mut d, id) = fresh();
+        d.stroke_dynamic(
+            id,
+            &points,
+            6.0,
+            Stroke::Brush { color: fg },
+            &BrushDynamics {
+                purity: -100,
+                ..dynamics
+            },
+        )
+        .unwrap();
+        for [r, g, b] in painted_colors(&d, id) {
+            assert!(r == g && g == b, "not grey: ({r},{g},{b})");
+        }
+        // Out-of-range settings are refused.
+        let (mut d, id) = fresh();
+        for bad in [
+            BrushDynamics {
+                fg_bg_jitter: 101,
+                ..BrushDynamics::default()
+            },
+            BrushDynamics {
+                hue_jitter: 101,
+                ..BrushDynamics::default()
+            },
+            BrushDynamics {
+                saturation_jitter: 101,
+                ..BrushDynamics::default()
+            },
+            BrushDynamics {
+                brightness_jitter: 101,
+                ..BrushDynamics::default()
+            },
+            BrushDynamics {
+                purity: -128,
+                ..BrushDynamics::default()
+            },
+        ] {
+            assert!(d
+                .stroke_dynamic(id, &points, 4.0, Stroke::Brush { color: fg }, &bad)
+                .is_err());
+        }
     }
 
     #[test]

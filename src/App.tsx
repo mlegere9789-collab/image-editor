@@ -1767,6 +1767,12 @@ export default function App() {
     opacityJitter: 0,
     hardness: 100,
     seed: 1,
+    fgBgJitter: 0,
+    backgroundColor: [0, 0, 0],
+    hueJitter: 0,
+    saturationJitter: 0,
+    brightnessJitter: 0,
+    purity: 0,
   });
   const strokeSeed = useRef(1);
   const [tipSpacing, setTipSpacing] = useState(4);
@@ -23363,8 +23369,12 @@ export default function App() {
               With Brush Settings on, the Brush, Eraser and a defined tip paint
               dab by dab: a dab every Spacing percent of the diameter, each
               dab&apos;s size, angle, roundness, position and opacity drawn by
-              the jitters below. Every jitter at zero, Count 1 and Hardness 100
-              is the plain stroke laid as dabs.
+              the jitters below. Color Dynamics (the Brush tool only) jitters
+              each dab&apos;s own colour instead: mixed toward the background
+              swatch, then its hue/saturation/brightness perturbed, then Purity
+              pushed toward or away from grey. Every jitter at zero, Count 1,
+              Hardness 100 and Purity 0 is the plain stroke laid as dabs in the
+              brush colour.
             </p>
             {(
               [
@@ -23379,6 +23389,26 @@ export default function App() {
                 ["count", "Count", 1, 16],
                 ["countJitter", "Count Jitter (%)", 0, 100],
                 ["opacityJitter", "Opacity Jitter (%)", 0, 100],
+                [
+                  "fgBgJitter",
+                  "Color Dynamics: Foreground/Background Jitter (%)",
+                  0,
+                  100,
+                ],
+                ["hueJitter", "Color Dynamics: Hue Jitter (%)", 0, 100],
+                [
+                  "saturationJitter",
+                  "Color Dynamics: Saturation Jitter (%)",
+                  0,
+                  100,
+                ],
+                [
+                  "brightnessJitter",
+                  "Color Dynamics: Brightness Jitter (%)",
+                  0,
+                  100,
+                ],
+                ["purity", "Color Dynamics: Purity", -100, 100],
               ] as [keyof BrushDynamics, string, number, number][]
             ).map(([key, label, min, max]) => (
               <label key={key} className="control">
@@ -23422,6 +23452,22 @@ export default function App() {
               />
               <span className="control__label">Use Brush Settings</span>
             </label>
+            <label className="control control--row">
+              <span className="control__label">
+                Color Dynamics: Background swatch
+              </span>
+              <input
+                type="color"
+                value={rgbToHex(...brushDynamics.backgroundColor)}
+                onChange={(event) =>
+                  setBrushDynamics((d) => ({
+                    ...d,
+                    backgroundColor: hexToRgb(event.target.value),
+                  }))
+                }
+                title="Foreground/Background Jitter mixes each dab toward this colour"
+              />
+            </label>
             <div className="modal__actions">
               <button
                 className="button button--quiet"
@@ -23440,6 +23486,12 @@ export default function App() {
                     countJitter: 0,
                     opacityJitter: 0,
                     hardness: 100,
+                    fgBgJitter: 0,
+                    backgroundColor: [0, 0, 0],
+                    hueJitter: 0,
+                    saturationJitter: 0,
+                    brightnessJitter: 0,
+                    purity: 0,
                   }))
                 }
                 title="Back to the plain round brush"
