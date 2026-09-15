@@ -51,6 +51,12 @@ export type LayerView = {
  * source's transparency as an opaque grey. */
 export type ApplyChannel = "rgb" | "red" | "green" | "blue" | "transparency";
 
+/** Mirrors `ApplyTarget` in src-tauri/src/document.rs: Apply Image's own
+ * target-Channel choice — RGB writes every colour channel and the
+ * composited alpha as usual; a single channel writes only that one byte
+ * of the target layer. */
+export type ApplyTarget = "rgb" | "red" | "green" | "blue" | "alpha";
+
 /** Mirrors `ApplyMask` in src-tauri/src/document.rs: Apply Image's Mask
  * group — a mask image (`null` = merged) read through one channel (RGB =
  * luma), optionally inverted. */

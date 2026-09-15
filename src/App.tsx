@@ -53,6 +53,7 @@ import type {
   Interpolation,
   ApplyBlend,
   ApplyChannel,
+  ApplyTarget,
   ApplyMask,
   BitDepth,
   BitmapMethod,
@@ -1339,6 +1340,8 @@ export default function App() {
     useState<ApplyBlend["kind"]>("mode");
   const [applyImageChannel, setApplyImageChannel] =
     useState<ApplyChannel>("rgb");
+  const [applyImageTargetChannel, setApplyImageTargetChannel] =
+    useState<ApplyTarget>("rgb");
   // Apply Image's Mask group: off, or a mask image and channel, optionally
   // inverted.
   const [applyImageMasked, setApplyImageMasked] = useState(false);
@@ -3967,6 +3970,7 @@ export default function App() {
       channel: applyImageChannel,
       blend,
       mask,
+      targetChannel: applyImageTargetChannel,
       opacity: Math.round(applyImageOpacity),
       invert: applyImageInvert,
       preserveTransparency: applyImagePreserve,
@@ -3974,6 +3978,7 @@ export default function App() {
   }, [
     applyImageSource,
     applyImageChannel,
+    applyImageTargetChannel,
     applyImageMasked,
     applyImageMaskSource,
     applyImageMaskChannel,
@@ -19410,6 +19415,22 @@ export default function App() {
                 <option value="green">Green</option>
                 <option value="blue">Blue</option>
                 <option value="transparency">Transparency</option>
+              </select>
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Target Channel</span>
+              <select
+                value={applyImageTargetChannel}
+                onChange={(event) =>
+                  setApplyImageTargetChannel(event.target.value as ApplyTarget)
+                }
+                title="Isolate the write to one channel of the target layer, as though only it were active in the Channels panel"
+              >
+                <option value="rgb">RGB</option>
+                <option value="red">Red</option>
+                <option value="green">Green</option>
+                <option value="blue">Blue</option>
+                <option value="alpha">Alpha</option>
               </select>
             </label>
             <label className="control control--row">

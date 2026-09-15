@@ -846,6 +846,27 @@ impl ApplyChannel {
     }
 }
 
+/// Apply Image's own target-Channel choice — Photoshop's own Channels
+/// panel isolating a single channel of the target layer (a colour
+/// channel, or its Alpha) before running Apply Image, so only that one
+/// channel changes. RGB, the default, writes all three colour channels
+/// (and the composited alpha) exactly as [`Document::apply_image`] always
+/// has; a single-channel target writes only that one destination byte,
+/// reading the matching index of the source's own [`ApplyChannel::view`]
+/// (already collapsed to a repeated grey for a single-channel source, so
+/// Red/Green/Blue/Alpha all read a sensible value regardless of what the
+/// source Channel is set to) and leaving every other byte — the layer's
+/// other colours and its alpha — untouched.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ApplyTarget {
+    Rgb,
+    Red,
+    Green,
+    Blue,
+    Alpha,
+}
+
 /// Apply Image's Mask group: a mask image — a layer, or with `None` the
 /// merged composite — read through one channel and optionally inverted,
 /// scaling the source's effective opacity pixel by pixel. Through RGB the
@@ -13221,8 +13242,9 @@ impl Document {
     /// target pixels stay untouched — Lock Transparent Pixels, in effect.
     /// Confined to the selection and snapshot-based, so a layer may be
     /// applied to itself. Errors on a locked or unknown target, an unknown
-    /// source, or an opacity over 100. Photoshop's single-channel sources,
-    /// its mask options, and its live preview are documented scope cuts.
+    /// source, or an opacity over 100. See [`Self::apply_image_with`] for
+    /// the full Channel, Blending, Mask, and target-Channel options this
+    /// plain function always defaults to RGB/Normal/no mask/RGB.
     pub fn apply_image(
         &mut self,
         target: LayerId,
@@ -13238,6 +13260,7 @@ impl Document {
             ApplyChannel::Rgb,
             ApplyBlend::Mode { mode: blend },
             None,
+            ApplyTarget::Rgb,
             opacity,
             invert,
             preserve_transparency,
@@ -13256,9 +13279,14 @@ impl Document {
     /// opacity over an opaque target the channel is the blend result
     /// itself. `mask`, when given, scales the source's effective opacity
     /// pixel by pixel by [`ApplyMask::weight`] — Photoshop's Mask group,
-    /// applied alongside Opacity before anything else. Errors additionally
-    /// for a scale outside `1..=2`, an offset outside `-255..=255`, or an
-    /// unknown mask layer.
+    /// applied alongside Opacity before anything else. `target_channel`
+    /// ([`ApplyTarget`]) restricts the write itself to a single channel of
+    /// the target layer — Photoshop's own Channels-panel isolation — RGB
+    /// writing every colour channel and the composited alpha exactly as
+    /// before, a single channel writing only that one byte and leaving
+    /// every other byte of the pixel untouched, alpha included. Errors
+    /// additionally for a scale outside `1..=2`, an offset outside
+    /// `-255..=255`, or an unknown mask layer.
     #[allow(clippy::too_many_arguments)]
     pub fn apply_image_with(
         &mut self,
@@ -13267,6 +13295,7 @@ impl Document {
         channel: ApplyChannel,
         blend: ApplyBlend,
         mask: Option<ApplyMask>,
+        target_channel: ApplyTarget,
         opacity: u8,
         invert: bool,
         preserve_transparency: bool,
@@ -13311,31 +13340,41 @@ impl Document {
             if source_alpha <= 0.0 || (preserve_transparency && backdrop_alpha <= 0.0) {
                 return out;
             }
-            let source_channel = |channel: usize| {
-                let cs = to_unit(src[channel]);
+            let source_channel = |idx: usize| {
+                let cs = to_unit(src[idx]);
                 if invert {
                     1.0 - cs
                 } else {
                     cs
                 }
             };
-            if preserve_transparency {
-                for (channel, slot) in out.iter_mut().enumerate().take(3) {
-                    let (cb, cs) = (to_unit(dst[channel]), source_channel(channel));
-                    let mixed = source_alpha * blend.blend(cb, cs) + (1.0 - source_alpha) * cb;
-                    *slot = to_byte(mixed);
-                }
-                return out;
-            }
             let out_alpha = source_alpha + backdrop_alpha * (1.0 - source_alpha);
-            for (channel, slot) in out.iter_mut().enumerate().take(3) {
-                let (cb, cs) = (to_unit(dst[channel]), source_channel(channel));
-                let blended = (1.0 - backdrop_alpha) * cs + backdrop_alpha * blend.blend(cb, cs);
-                let co = (source_alpha * blended + backdrop_alpha * cb * (1.0 - source_alpha))
-                    / out_alpha;
-                *slot = to_byte(co);
+            let color_at = |idx: usize| -> f32 {
+                let cb = to_unit(dst[idx]);
+                let cs = source_channel(idx);
+                if preserve_transparency {
+                    source_alpha * blend.blend(cb, cs) + (1.0 - source_alpha) * cb
+                } else {
+                    let blended =
+                        (1.0 - backdrop_alpha) * cs + backdrop_alpha * blend.blend(cb, cs);
+                    (source_alpha * blended + backdrop_alpha * cb * (1.0 - source_alpha))
+                        / out_alpha
+                }
+            };
+            match target_channel {
+                ApplyTarget::Rgb => {
+                    for (idx, slot) in out.iter_mut().enumerate().take(3) {
+                        *slot = to_byte(color_at(idx));
+                    }
+                    if !preserve_transparency {
+                        out[3] = to_byte(out_alpha);
+                    }
+                }
+                ApplyTarget::Red => out[0] = to_byte(color_at(0)),
+                ApplyTarget::Green => out[1] = to_byte(color_at(1)),
+                ApplyTarget::Blue => out[2] = to_byte(color_at(2)),
+                ApplyTarget::Alpha => out[3] = to_byte(color_at(3)),
             }
-            out[3] = to_byte(out_alpha);
             out
         })
     }
@@ -13354,6 +13393,7 @@ impl Document {
         channel: ApplyChannel,
         blend: ApplyBlend,
         mask: Option<ApplyMask>,
+        target_channel: ApplyTarget,
         opacity: u8,
         invert: bool,
         preserve_transparency: bool,
@@ -13365,6 +13405,7 @@ impl Document {
             channel,
             blend,
             mask,
+            target_channel,
             opacity,
             invert,
             preserve_transparency,
@@ -55966,6 +56007,91 @@ mod tests {
     }
 
     #[test]
+    fn apply_image_target_channel_writes_only_that_one_byte() {
+        // Same fixture as apply_image_add_sums_the_target_and_source:
+        // source (50, 100, 240), target (100, 200, 30), both fully
+        // opaque. Normal blend at full opacity always replaces outright,
+        // so ApplyTarget::Red should read exactly like a full RGB apply
+        // would for the red channel alone (50), while green, blue, and
+        // alpha stay the target's own original values untouched.
+        let (mut doc, source, target) = arithmetic_pair();
+        doc.apply_image_with(
+            target,
+            Some(source),
+            ApplyChannel::Rgb,
+            ApplyBlend::Mode {
+                mode: BlendMode::Normal,
+            },
+            None,
+            ApplyTarget::Red,
+            100,
+            false,
+            false,
+        )
+        .unwrap();
+        assert_eq!(pixel(&doc, target, 0, 0), [50, 200, 30, 255]);
+        // Green and Blue targets are the mirror case.
+        let (mut doc, source, target) = arithmetic_pair();
+        doc.apply_image_with(
+            target,
+            Some(source),
+            ApplyChannel::Rgb,
+            ApplyBlend::Mode {
+                mode: BlendMode::Normal,
+            },
+            None,
+            ApplyTarget::Green,
+            100,
+            false,
+            false,
+        )
+        .unwrap();
+        assert_eq!(pixel(&doc, target, 0, 0), [100, 100, 30, 255]);
+        let (mut doc, source, target) = arithmetic_pair();
+        doc.apply_image_with(
+            target,
+            Some(source),
+            ApplyChannel::Rgb,
+            ApplyBlend::Mode {
+                mode: BlendMode::Normal,
+            },
+            None,
+            ApplyTarget::Blue,
+            100,
+            false,
+            false,
+        )
+        .unwrap();
+        assert_eq!(pixel(&doc, target, 0, 0), [100, 200, 240, 255]);
+        // Alpha target: a fresh fixture with a distinct source alpha (51,
+        // exactly 1/5) against an opaque target (alpha 255). An opaque
+        // backdrop always composites back to fully opaque (out_alpha =
+        // source_alpha + 1 * (1 - source_alpha) = 1 regardless), and
+        // Normal's own B(Cb, Cs) = Cs collapses the general formula to
+        // source_alpha * cs + backdrop_alpha * cb * (1 - source_alpha)
+        // = 0.2 * 0.2 + 1 * (1 - 0.2) = 0.84 -> 214. Every colour
+        // channel stays the target's own original value.
+        let mut doc = Document::new(1, 1).unwrap();
+        let source = doc.add_layer("source", &[50, 100, 240, 51], 1, 1).unwrap();
+        let target = doc.add_layer("target", &[100, 200, 30, 255], 1, 1).unwrap();
+        doc.apply_image_with(
+            target,
+            Some(source),
+            ApplyChannel::Rgb,
+            ApplyBlend::Mode {
+                mode: BlendMode::Normal,
+            },
+            None,
+            ApplyTarget::Alpha,
+            100,
+            false,
+            false,
+        )
+        .unwrap();
+        assert_eq!(pixel(&doc, target, 0, 0), [100, 200, 30, 214]);
+    }
+
+    #[test]
     fn apply_image_add_sums_the_target_and_source() {
         // Scale 1: 150, 300 → 255, 270 → 255. Scale 2: 75, 150, 135.
         let (mut doc, source, target) = arithmetic_pair();
@@ -55978,6 +56104,7 @@ mod tests {
                 offset: 0,
             },
             None,
+            ApplyTarget::Rgb,
             100,
             false,
             false,
@@ -55994,6 +56121,7 @@ mod tests {
                 offset: 0,
             },
             None,
+            ApplyTarget::Rgb,
             100,
             false,
             false,
@@ -56017,6 +56145,7 @@ mod tests {
                 offset: -20,
             },
             None,
+            ApplyTarget::Rgb,
             100,
             false,
             false,
@@ -56039,6 +56168,7 @@ mod tests {
                 offset: 0,
             },
             None,
+            ApplyTarget::Rgb,
             100,
             false,
             false,
@@ -56055,6 +56185,7 @@ mod tests {
                 offset: 128,
             },
             None,
+            ApplyTarget::Rgb,
             100,
             false,
             false,
@@ -56071,6 +56202,7 @@ mod tests {
                 offset: 64,
             },
             None,
+            ApplyTarget::Rgb,
             100,
             false,
             false,
@@ -56094,6 +56226,7 @@ mod tests {
                 offset: 0,
             },
             None,
+            ApplyTarget::Rgb,
             50,
             false,
             false,
@@ -56113,6 +56246,7 @@ mod tests {
                 offset: 0,
             },
             None,
+            ApplyTarget::Rgb,
             100,
             false,
             false,
@@ -56153,6 +56287,7 @@ mod tests {
                     ApplyChannel::Rgb,
                     blend,
                     None,
+                    ApplyTarget::Rgb,
                     100,
                     false,
                     false
@@ -56168,6 +56303,7 @@ mod tests {
                 mode: BlendMode::Multiply,
             },
             None,
+            ApplyTarget::Rgb,
             100,
             false,
             false,
@@ -56191,6 +56327,7 @@ mod tests {
                 mode: BlendMode::Normal,
             },
             None,
+            ApplyTarget::Rgb,
             100,
             false,
             false,
@@ -56254,6 +56391,7 @@ mod tests {
                 mode: BlendMode::Normal,
             },
             None,
+            ApplyTarget::Rgb,
             100,
             true,
             false,
@@ -56275,6 +56413,7 @@ mod tests {
                 mode: BlendMode::Multiply,
             },
             None,
+            ApplyTarget::Rgb,
             100,
             false,
             false,
@@ -56291,6 +56430,7 @@ mod tests {
                 offset: 0,
             },
             None,
+            ApplyTarget::Rgb,
             100,
             false,
             false,
@@ -56313,6 +56453,7 @@ mod tests {
                 mode: BlendMode::Normal,
             },
             None,
+            ApplyTarget::Rgb,
             100,
             false,
             false,
@@ -56328,6 +56469,7 @@ mod tests {
                 mode: BlendMode::Normal,
             },
             None,
+            ApplyTarget::Rgb,
             100,
             false,
             false,
@@ -56344,6 +56486,7 @@ mod tests {
                 mode: BlendMode::Normal,
             },
             None,
+            ApplyTarget::Rgb,
             100,
             false,
             false,
@@ -56377,6 +56520,7 @@ mod tests {
                 mode: BlendMode::Normal,
             },
             Some(mask),
+            ApplyTarget::Rgb,
             opacity,
             false,
             false,
@@ -56497,6 +56641,7 @@ mod tests {
                     mode: BlendMode::Normal,
                 },
                 Some(unknown),
+                ApplyTarget::Rgb,
                 100,
                 false,
                 false,
@@ -66269,6 +66414,7 @@ colorspaces:
                     mode: BlendMode::Multiply,
                 },
                 None,
+                ApplyTarget::Rgb,
                 100,
                 false,
                 false,
@@ -66287,6 +66433,7 @@ colorspaces:
                     mode: BlendMode::Multiply,
                 },
                 None,
+                ApplyTarget::Rgb,
                 100,
                 false,
                 false,
@@ -66307,6 +66454,7 @@ colorspaces:
                     mode: BlendMode::Normal,
                 },
                 None,
+                ApplyTarget::Rgb,
                 101,
                 false,
                 false,
@@ -66322,6 +66470,7 @@ colorspaces:
                     mode: BlendMode::Normal,
                 },
                 None,
+                ApplyTarget::Rgb,
                 100,
                 false,
                 false,
@@ -66340,6 +66489,7 @@ colorspaces:
                     mode: BlendMode::Normal,
                 },
                 None,
+                ApplyTarget::Rgb,
                 100,
                 false,
                 false,
@@ -66368,17 +66518,41 @@ colorspaces:
         );
         let first = doc
             .apply_image_preview(
-                args.0, args.1, args.2, args.3, args.4, args.5, args.6, args.7,
+                args.0,
+                args.1,
+                args.2,
+                args.3,
+                args.4,
+                ApplyTarget::Rgb,
+                args.5,
+                args.6,
+                args.7,
             )
             .unwrap();
         let second = doc
             .apply_image_preview(
-                args.0, args.1, args.2, args.3, args.4, args.5, args.6, args.7,
+                args.0,
+                args.1,
+                args.2,
+                args.3,
+                args.4,
+                ApplyTarget::Rgb,
+                args.5,
+                args.6,
+                args.7,
             )
             .unwrap();
         assert_eq!(first, second);
         doc.apply_image_with(
-            args.0, args.1, args.2, args.3, args.4, args.5, args.6, args.7,
+            args.0,
+            args.1,
+            args.2,
+            args.3,
+            args.4,
+            ApplyTarget::Rgb,
+            args.5,
+            args.6,
+            args.7,
         )
         .unwrap();
         assert_eq!(doc.layer(target).unwrap().pixels, first);
@@ -66396,6 +66570,7 @@ colorspaces:
                     mode: BlendMode::Normal,
                 },
                 None,
+                ApplyTarget::Rgb,
                 100,
                 true,
                 true,
@@ -66411,6 +66586,7 @@ colorspaces:
                     mode: BlendMode::Normal,
                 },
                 None,
+                ApplyTarget::Rgb,
                 100,
                 true,
                 true,
@@ -66438,6 +66614,7 @@ colorspaces:
                     mode: BlendMode::Normal,
                 },
                 Some(mask),
+                ApplyTarget::Rgb,
                 100,
                 false,
                 false,
@@ -66453,6 +66630,7 @@ colorspaces:
                     mode: BlendMode::Normal,
                 },
                 Some(mask),
+                ApplyTarget::Rgb,
                 100,
                 false,
                 false,

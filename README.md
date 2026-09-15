@@ -23594,6 +23594,63 @@ computed by hand before running and confirmed exactly on the first try.
 Tests: 1917 Rust (1916 → 1917), 33 frontend (unchanged — one dropdown
 added to the Load Selection dialog, no new test file needed).
 
+## Phase 404 — Apply Image's Target Channel
+
+APPLY IMAGE — SOURCE CHANNEL's own "alpha channels and single-channel
+targets are documented scope cuts" line was the next largest-impact item
+in `docs/PLAN_TO_100.md`'s Phase D backlog — and while re-reading both
+Apply Image rows to scope it, the base row's own text turned out to be
+stale: it still listed "the mask options, and the live preview" as scope
+cuts, even though Phases 224 and 263 had already shipped both (`ApplyMask`
+and `apply_image_preview`). Fixed as part of this phase's own doc pass,
+alongside adding the one thing genuinely still missing: `ApplyTarget`
+(Rgb/Red/Green/Blue/Alpha), Photoshop's own Channels-panel isolation —
+running Apply Image while only one channel of the target layer is active,
+so the result writes into that one byte alone and every other byte of the
+pixel, including alpha unless Alpha itself is the target, stays exactly
+the destination's own original value.
+
+`apply_image_with` gained a new required `target_channel: ApplyTarget`
+parameter, its per-pixel body refactored around a generalised `color_at`
+closure — the exact same composite-over-backdrop and Preserve-Transparency
+formulas the RGB path always used, just callable for any one of the four
+byte indices instead of hard-coded to a `0..3` loop — so `ApplyTarget::Rgb`
+reproduces the original three-channel loop (plus the alpha write, skipped
+under Preserve Transparency exactly as before) byte for byte. `apply_image`
+and `apply_image_preview` both widened to thread the new parameter through
+unchanged in every other respect. With ~32 real call sites across this
+project's own test suite (every one still using the RGB default), a small
+Python script parsed each call's own top-level argument commas by paren
+depth and inserted `ApplyTarget::Rgb,` after the fifth argument (`mask`)
+mechanically, rather than by hand one at a time — `cargo build`/`cargo
+test --no-run` confirmed the two hand-written definition-side call sites
+(`apply_image`'s own delegation, `apply_image_preview`'s own delegation to
+`apply_image_with`) needed a real, human edit instead, and one of those
+two caught a script false-positive (a variable literally named
+`target_channel` that the script's naive "already has ApplyTarget" check
+missed, briefly inserting a duplicate argument) before the fix compiled.
+`apply_image`'s Tauri command widened to take an optional `targetChannel`
+(defaulting to RGB). The frontend's Apply Image dialog gained a Target
+Channel dropdown next to the existing source Channel one.
+
+**Verified.** All 25 pre-existing Apply Image tests pass unmodified in
+behaviour, confirming the `color_at` refactor changed nothing at
+`ApplyTarget::Rgb`. One new hand-computed test,
+`apply_image_target_channel_writes_only_that_one_byte`, reuses the
+existing arithmetic fixture (source `(50, 100, 240)`, opaque target
+`(100, 200, 30)`, both fully opaque so Normal at full opacity always
+replaces outright): Red/Green/Blue targets each read exactly like a full
+RGB apply would for that one channel (`50`/`100`/`240`) while every other
+byte, alpha included, stays the target's own original value; a fresh
+fixture with a distinct source alpha (`51`, exactly 1/5) against an opaque
+target derives the Alpha-target case by hand from the general compositing
+formula — `0.2 · 0.2 + 1 · (1 − 0.2) = 0.84 → 214` — with every colour
+channel again left untouched. `cargo fmt`/`clippy --all-targets -D
+warnings`/`test` and `npm run build`/`test`/`tsc --noEmit` all clean.
+
+Tests: 1918 Rust (1917 → 1918), 33 frontend (unchanged — one dropdown
+added to the Apply Image dialog, no new test file needed).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
