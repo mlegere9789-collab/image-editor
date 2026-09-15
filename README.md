@@ -25232,6 +25232,37 @@ new field is additive. `npx tsc --noEmit`, `npm run build`, and
 
 Tests: 1970 Rust (unchanged), 46 frontend (44 → 46: two new tests).
 
+## Phase 433 — Radial Blur's On-Canvas Blur-Center Dial
+
+Resolved Radial Blur's own documented scope cut: its centre was typed
+into two numeric fields, with no on-canvas dial the way Field Blur,
+Iris Blur, and Tilt-Shift have all had since Phases 361/383/428/429.
+Photoshop's own Radial Blur dial is, mechanically, exactly a draggable
+centre point — nothing else about the dial has state of its own to
+drag — so this reuses the same shared on-canvas overlay machinery those
+three tools already built rather than inventing a new one: the
+`blurDrag` union (`App.tsx`) gained a plain `"radial"` member alongside
+its existing `"iris"`/`"tiltFocus"`/etc, the shared `move` handler's
+`switch` gained a `"radial"` case that calls the existing
+`setRadialBlurCenterX`/`setRadialBlurCenterY`, and the overlay's render
+gained one more `pin("radial", radialBlurCenterX, radialBlurCenterY,
+"Radial Blur centre")` — the exact same `pin` helper Iris Blur's own
+centre already uses, positioned by the same already-tested
+`documentPoint`/`percentOf` primitives (`blurPins.ts`). The overlay's
+outer visibility gate picked up `showRadialBlurDialog` alongside its
+three existing dialogs so the pin actually mounts when only Radial
+Blur is open.
+
+No new pure logic to test — like Distort's own on-canvas handles
+(Phase 423), this is wiring together already-tested primitives
+(`documentPoint`, `pixelDistance`, `percentOf`, all covered by
+`blurPins.test.ts`) rather than new arithmetic, so no new test file is
+warranted. `npx tsc --noEmit`, `npm run build`, and `npm test` all
+clean, the existing 46 frontend tests passing unmodified; no Rust file
+touched.
+
+Tests: 1970 Rust (unchanged), 46 frontend (unchanged).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

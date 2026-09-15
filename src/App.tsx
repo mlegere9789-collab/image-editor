@@ -2465,6 +2465,7 @@ export default function App() {
     | "tiltFocus"
     | "tiltBandTop"
     | "tiltBandBottom"
+    | "radial"
     | null
   >(null);
   const [tiltShiftFocusRow, setTiltShiftFocusRow] = useState(0);
@@ -38238,7 +38239,8 @@ export default function App() {
               )}
               {(showFieldBlurDialog ||
                 showIrisBlurDialog ||
-                showTiltShiftDialog) &&
+                showTiltShiftDialog ||
+                showRadialBlurDialog) &&
                 (() => {
                   const doc = document;
                   const pointAt = (event: React.PointerEvent) => {
@@ -38297,6 +38299,10 @@ export default function App() {
                         setTiltShiftHalfHeight(
                           Math.max(1, Math.abs(at.y - tiltShiftFocusRow)),
                         );
+                        break;
+                      case "radial":
+                        setRadialBlurCenterX(at.x);
+                        setRadialBlurCenterY(at.y);
                         break;
                     }
                   };
@@ -38409,6 +38415,13 @@ export default function App() {
                           "Iris Blur centre",
                         ),
                       ]}
+                      {showRadialBlurDialog &&
+                        pin(
+                          "radial",
+                          radialBlurCenterX,
+                          radialBlurCenterY,
+                          "Radial Blur centre",
+                        )}
                       {showTiltShiftDialog && [
                         line(
                           "tiltBandTop",
