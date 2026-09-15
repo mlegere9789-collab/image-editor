@@ -24395,6 +24395,80 @@ build`/`test`/`tsc --noEmit` all clean.
 Tests: 1948 Rust (1946 → 1948), 36 frontend (unchanged — a backend-only
 fix with no new UI).
 
+## Phase 418 — Triangle, Polygon, and Star Tools' Smooth Corners and Smooth Indents
+
+TRIANGLE TOOL's rounded-corner option and POLYGON TOOL's Smooth Corners
+were the one scope cut Phase 415's own stroke work left standing; STAR
+TOOL adds its own second, independent toggle on top, Smooth Indents,
+rounding the inner notches separately from the outer points.
+
+Photoshop's own Smooth Corners has no numeric radius control — it is a
+plain checkbox, the actual fillet radius an undocumented internal detail
+that scales with the shape. This phase reaches for the same kind of
+explicit, deterministic stand-in Field Blur's own inverse-distance
+weighting already is for Photoshop's spline interpolation: a new
+`round_polygon_corners(vertices, should_round)` replaces each selected
+vertex with a quadratic Bézier arc — its two control points a quarter of
+the way along that vertex's own shorter adjacent edge (so the radius
+scales with the polygon itself, never a fixed pixel amount), sampled at
+six straight segments, bulging toward the original corner while staying
+tangent to both edges at its own ends. A vertex `should_round` doesn't
+select stays exactly as it was. Since the rounded output is still just a
+longer list of `(f32, f32)` vertices, it needs no new painting code at
+all: `paint_polygon_with`'s own even-odd fill and distance-to-edge stroke
+banding (Phase 415) already handle it.
+
+`draw_polygon_with`/`draw_triangle_with` each gained one new `smooth: bool`
+parameter, rounding every vertex when set; `draw_star_with` gained two,
+independent — `smooth` for the outer points (`i % 2 == 0` in its own
+alternating vertex list) and `smooth_indents` for the inner notches
+(`i % 2 == 1`) — matching Photoshop's own two separate Star checkboxes
+exactly, rather than folding them into one. `draw_polygon`/`draw_triangle`
+delegate with `smooth: false`; `draw_star` with both flags `false`; all
+three Tauri commands gained an `Option<bool>` (`Option<bool>` × 2 for
+Star) defaulting off. The frontend's shared shape-tool options bar gained
+a Smooth Corners checkbox for Triangle, Star, and Polygon, and a second
+Smooth Indents checkbox for Star alone.
+
+**Verified two ways.** Five new hand-computed tests, two of them directly
+on `round_polygon_corners` itself (a private free function the test
+module's own `use super::*` already reaches, exactly like every other
+polygon-geometry helper in this file):
+`round_polygon_corners_fillets_a_selected_vertex_with_a_quarter_edge_radius`
+— the apex-(2.5, 0)/base-(0, 5)-(5, 5) triangle other tests already use
+has equal-length edges from its apex, so `r = 0.25 · min(d_prev, d_next)`
+simplifies exactly to `apex + 0.25 · (neighbour - apex)`: control points
+at (1.875, 1.25) and (3.125, 1.25), the arc's own midpoint at
+(2.5, 0.625), cross-checked against an independent Python port of the
+same quadratic-Bézier arithmetic.
+`round_polygon_corners_only_rounds_the_vertices_should_round_selects` —
+on a 4×4 square, rounding vertices 0 and 2 alone leaves 1 and 3 exactly
+as given, the per-vertex selection Star's own two independent toggles
+rely on. Three more tests exercise the actual tools:
+`draw_triangle_with_smooth_cuts_the_sharp_apex` and
+`draw_polygon_with_smooth_cuts_all_four_sharp_points` smooth
+`triangle_tool_fits_the_box_in_either_drag_direction`'s and
+`polygon_tool_paints_a_diamond_from_its_centre`'s own shapes, each losing
+exactly the pixel(s) at their sharp points; both cross-checked against an
+independent Python port of `point_in_polygon` over the smoothed vertex
+list.
+`draw_star_with_smooth_indents_rounds_the_inner_notch_independently_of_the_outer_points`
+— on `star_tool_paints_a_three_pointed_star`'s own star, Smooth Indents
+alone fills in a pixel at the inner notch while Smooth Corners alone
+leaves this particular star pixel-for-pixel identical to the sharp one
+(its outer tips are already one-pixel spikes too thin for a quarter-edge
+rounding to shift at this resolution) — proving the two toggles act
+independently rather than one silently standing in for the other. All
+pre-existing `triangle_tool_*`/`polygon_tool_*`/`star_tool_*`/
+`custom_shape_*`/`draw_triangle_with_*`/`draw_star_with_*`/
+`draw_polygon_with_*` tests still pass unmodified. `cargo
+fmt`/`clippy --all-targets -D warnings`/`test` and `npm run
+build`/`test`/`tsc --noEmit` all clean.
+
+Tests: 1953 Rust (1948 → 1953), 36 frontend (unchanged — the new
+checkboxes reuse the existing shape-tool options-bar pattern and need no
+new test file).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

@@ -3273,6 +3273,9 @@ export default function App() {
     "outside" | "inside" | "center"
   >("inside");
   const [shapeRadius, setShapeRadius] = useState(0);
+  // Triangle/Polygon/Star Smooth Corners, and the Star tool's own separate Smooth Indents.
+  const [shapeSmoothCorners, setShapeSmoothCorners] = useState(false);
+  const [shapeSmoothIndents, setShapeSmoothIndents] = useState(false);
   const [shapeToolMode, setShapeToolMode] = useState<
     "pixels" | "shape" | "path"
   >("pixels");
@@ -11429,6 +11432,7 @@ export default function App() {
                 fill,
                 stroke,
                 position: shapeStrokePosition,
+                smooth: shapeSmoothCorners,
               });
             } else if (tool === "star") {
               void runCommand("draw_star", {
@@ -11442,6 +11446,8 @@ export default function App() {
                 fill,
                 stroke,
                 position: shapeStrokePosition,
+                smooth: shapeSmoothCorners,
+                smoothIndents: shapeSmoothIndents,
               });
             } else if (tool === "polygon") {
               void runCommand("draw_polygon", {
@@ -11454,6 +11460,7 @@ export default function App() {
                 fill,
                 stroke,
                 position: shapeStrokePosition,
+                smooth: shapeSmoothCorners,
               });
             } else if (tool === "line") {
               void runCommand("draw_line", {
@@ -11596,6 +11603,8 @@ export default function App() {
       shapeStrokeWidth,
       shapeStrokeColor,
       shapeStrokePosition,
+      shapeSmoothCorners,
+      shapeSmoothIndents,
       shapeRadius,
       shapeToolMode,
       lineWeight,
@@ -15466,6 +15475,34 @@ export default function App() {
                     }
                   />
                   {shapeRadius}px
+                </label>
+              )}
+              {(tool === "triangle" ||
+                tool === "star" ||
+                tool === "polygon") && (
+                <label className="tools__slider">
+                  <input
+                    type="checkbox"
+                    checked={shapeSmoothCorners}
+                    disabled={!canPaint}
+                    onChange={(event) =>
+                      setShapeSmoothCorners(event.target.checked)
+                    }
+                  />
+                  Smooth Corners
+                </label>
+              )}
+              {tool === "star" && (
+                <label className="tools__slider">
+                  <input
+                    type="checkbox"
+                    checked={shapeSmoothIndents}
+                    disabled={!canPaint}
+                    onChange={(event) =>
+                      setShapeSmoothIndents(event.target.checked)
+                    }
+                  />
+                  Smooth Indents
                 </label>
               )}
             </>

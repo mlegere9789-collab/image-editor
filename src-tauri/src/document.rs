@@ -14107,15 +14107,19 @@ impl Document {
             Some(color),
             None,
             StrokePosition::Inside,
+            false,
         )
     }
 
     /// [`Self::draw_polygon`] with an optional stroke of `(colour, width)`
-    /// at Photoshop's own Inside, Center, or Outside `position`, and an
-    /// optional `fill` in place of the plain mandatory `color` — see
-    /// [`Self::paint_polygon_with`] for the shared geometry. At
-    /// `StrokePosition::Inside` with `fill: Some(color)` and
-    /// `stroke: None` this is pixel-identical to [`Self::draw_polygon`].
+    /// at Photoshop's own Inside, Center, or Outside `position`, an
+    /// optional `fill` in place of the plain mandatory `color`, and
+    /// Photoshop's own Smooth Corners `smooth` — see
+    /// [`Self::paint_polygon_with`] for the shared geometry and
+    /// [`round_polygon_corners`] for the smoothing itself. At
+    /// `StrokePosition::Inside` with `fill: Some(color)`, `stroke: None`,
+    /// and `smooth: false` this is pixel-identical to
+    /// [`Self::draw_polygon`].
     #[allow(clippy::too_many_arguments)]
     pub fn draw_polygon_with(
         &mut self,
@@ -14128,6 +14132,7 @@ impl Document {
         fill: Option<[u8; 4]>,
         stroke: Option<([u8; 4], u32)>,
         position: StrokePosition,
+        smooth: bool,
     ) -> Result<Option<Rect>, String> {
         if !(3..=100).contains(&sides) {
             return Err("A polygon needs between 3 and 100 sides.".to_string());
@@ -14146,6 +14151,11 @@ impl Document {
                 (cx + radius * angle.cos(), cy + radius * angle.sin())
             })
             .collect();
+        let vertices = if smooth {
+            round_polygon_corners(&vertices, |_| true)
+        } else {
+            vertices
+        };
         self.paint_polygon_with(id, &vertices, fill, stroke, position)
     }
 
@@ -14183,15 +14193,21 @@ impl Document {
             Some(color),
             None,
             StrokePosition::Inside,
+            false,
+            false,
         )
     }
 
     /// [`Self::draw_star`] with an optional stroke of `(colour, width)` at
-    /// Photoshop's own Inside, Center, or Outside `position`, and an
-    /// optional `fill` in place of the plain mandatory `color` — see
-    /// [`Self::paint_polygon_with`] for the shared geometry. At
-    /// `StrokePosition::Inside` with `fill: Some(color)` and
-    /// `stroke: None` this is pixel-identical to [`Self::draw_star`].
+    /// Photoshop's own Inside, Center, or Outside `position`, an optional
+    /// `fill` in place of the plain mandatory `color`, and Photoshop's own
+    /// Smooth Corners/Smooth Indents as two independent toggles — `smooth`
+    /// rounds the outer points, `smooth_indents` the inner notches, either
+    /// or both — see [`Self::paint_polygon_with`] for the shared geometry
+    /// and [`round_polygon_corners`] for the smoothing itself. At
+    /// `StrokePosition::Inside` with `fill: Some(color)`, `stroke: None`,
+    /// and both smoothing flags `false` this is pixel-identical to
+    /// [`Self::draw_star`].
     #[allow(clippy::too_many_arguments)]
     pub fn draw_star_with(
         &mut self,
@@ -14205,6 +14221,8 @@ impl Document {
         fill: Option<[u8; 4]>,
         stroke: Option<([u8; 4], u32)>,
         position: StrokePosition,
+        smooth: bool,
+        smooth_indents: bool,
     ) -> Result<Option<Rect>, String> {
         if !(3..=100).contains(&points) {
             return Err("A star needs between 3 and 100 points.".to_string());
@@ -14228,6 +14246,20 @@ impl Document {
                 (cx + r * angle.cos(), cy + r * angle.sin())
             })
             .collect();
+        let vertices = if smooth || smooth_indents {
+            round_polygon_corners(
+                &vertices,
+                |i| {
+                    if i % 2 == 0 {
+                        smooth
+                    } else {
+                        smooth_indents
+                    }
+                },
+            )
+        } else {
+            vertices
+        };
         self.paint_polygon_with(id, &vertices, fill, stroke, position)
     }
 
@@ -14259,15 +14291,19 @@ impl Document {
             Some(color),
             None,
             StrokePosition::Inside,
+            false,
         )
     }
 
     /// [`Self::draw_triangle`] with an optional stroke of `(colour,
     /// width)` at Photoshop's own Inside, Center, or Outside `position`,
-    /// and an optional `fill` in place of the plain mandatory `color` —
-    /// see [`Self::paint_polygon_with`] for the shared geometry. At
-    /// `StrokePosition::Inside` with `fill: Some(color)` and
-    /// `stroke: None` this is pixel-identical to [`Self::draw_triangle`].
+    /// an optional `fill` in place of the plain mandatory `color`, and
+    /// Photoshop's own rounded-corner option `smooth` — see
+    /// [`Self::paint_polygon_with`] for the shared geometry and
+    /// [`round_polygon_corners`] for the smoothing itself. At
+    /// `StrokePosition::Inside` with `fill: Some(color)`, `stroke: None`,
+    /// and `smooth: false` this is pixel-identical to
+    /// [`Self::draw_triangle`].
     #[allow(clippy::too_many_arguments)]
     pub fn draw_triangle_with(
         &mut self,
@@ -14279,6 +14315,7 @@ impl Document {
         fill: Option<[u8; 4]>,
         stroke: Option<([u8; 4], u32)>,
         position: StrokePosition,
+        smooth: bool,
     ) -> Result<Option<Rect>, String> {
         if ![x0, y0, x1, y1].iter().all(|v| v.is_finite()) {
             return Err("Triangle coordinates must be finite numbers.".to_string());
@@ -14289,7 +14326,14 @@ impl Document {
             return Ok(None);
         }
         let vertices = [((left + right) / 2.0, top), (right, bottom), (left, bottom)];
-        self.paint_polygon_with(id, &vertices, fill, stroke, position)
+        let smoothed;
+        let vertices: &[(f32, f32)] = if smooth {
+            smoothed = round_polygon_corners(&vertices, |_| true);
+            &smoothed
+        } else {
+            &vertices
+        };
+        self.paint_polygon_with(id, vertices, fill, stroke, position)
     }
 
     /// [`Self::draw_polygon_with`], [`Self::draw_star_with`], and
@@ -31437,6 +31481,69 @@ fn point_segment_distance(px: f32, py: f32, a: (f32, f32), b: (f32, f32)) -> f32
     ((px - cx).powi(2) + (py - cy).powi(2)).sqrt()
 }
 
+/// Rounds every corner of a closed polygon (`vertices`, in order) that
+/// `should_round` selects — the Polygon and Star tools' own Smooth
+/// Corners, and the Star tool's own separate Smooth Indents, applied per
+/// vertex index so a caller can round outer points and inner notches
+/// independently. Each rounded corner's sharp vertex is replaced by a
+/// quadratic Bézier arc: the two control points sit a quarter of the way
+/// along the shorter of its two adjacent edges (so the radius scales with
+/// the shape itself, the same way Photoshop's own auto-radius Smooth
+/// Corners does, without a numeric control to match it against), and the
+/// arc — six straight segments, `SMOOTH_SAMPLES` of them — bulges toward
+/// the original corner while staying tangent to both edges at its ends.
+/// A vertex `should_round` skips is kept sharp, unmodified. This is a
+/// deliberately simple, exact, hand-verifiable stand-in for Photoshop's
+/// own undocumented internal radius — the same spirit as Field Blur's own
+/// inverse-distance weighting standing in for spline interpolation.
+const SMOOTH_SAMPLES: u32 = 6;
+const SMOOTH_RADIUS_FRACTION: f32 = 0.25;
+
+fn round_polygon_corners(
+    vertices: &[(f32, f32)],
+    should_round: impl Fn(usize) -> bool,
+) -> Vec<(f32, f32)> {
+    let n = vertices.len();
+    let mut out = Vec::with_capacity(n * (SMOOTH_SAMPLES as usize + 1));
+    for i in 0..n {
+        let prev = vertices[(i + n - 1) % n];
+        let v = vertices[i];
+        let next = vertices[(i + 1) % n];
+        if !should_round(i) {
+            out.push(v);
+            continue;
+        }
+        let d_prev = ((v.0 - prev.0).powi(2) + (v.1 - prev.1).powi(2)).sqrt();
+        let d_next = ((next.0 - v.0).powi(2) + (next.1 - v.1).powi(2)).sqrt();
+        let r = SMOOTH_RADIUS_FRACTION * d_prev.min(d_next);
+        let a = if d_prev > f32::EPSILON {
+            (
+                v.0 + (prev.0 - v.0) / d_prev * r,
+                v.1 + (prev.1 - v.1) / d_prev * r,
+            )
+        } else {
+            v
+        };
+        let b = if d_next > f32::EPSILON {
+            (
+                v.0 + (next.0 - v.0) / d_next * r,
+                v.1 + (next.1 - v.1) / d_next * r,
+            )
+        } else {
+            v
+        };
+        for k in 0..=SMOOTH_SAMPLES {
+            let t = k as f32 / SMOOTH_SAMPLES as f32;
+            let mt = 1.0 - t;
+            out.push((
+                mt * mt * a.0 + 2.0 * t * mt * v.0 + t * t * b.0,
+                mt * mt * a.1 + 2.0 * t * mt * v.1 + t * t * b.1,
+            ));
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -41147,6 +41254,7 @@ mod tests {
             Some(FILL),
             Some((STROKE, 1)),
             StrokePosition::Inside,
+            false,
         )
         .unwrap();
         assert_eq!(
@@ -41170,6 +41278,7 @@ mod tests {
             Some(FILL),
             Some((STROKE, 1)),
             StrokePosition::Outside,
+            false,
         )
         .unwrap();
         assert_eq!(
@@ -41193,6 +41302,7 @@ mod tests {
             Some(FILL),
             Some((STROKE, 2)),
             StrokePosition::Center,
+            false,
         )
         .unwrap();
         assert_eq!(
@@ -41220,6 +41330,8 @@ mod tests {
             Some(FILL),
             None,
             StrokePosition::Inside,
+            false,
+            false,
         )
         .unwrap();
         assert_eq!(shape_grid(&doc, id), shape_grid(&doc2, id2));
@@ -41238,7 +41350,8 @@ mod tests {
                 4,
                 None,
                 None,
-                StrokePosition::Inside
+                StrokePosition::Inside,
+                false
             )
             .is_err());
         assert!(doc
@@ -41251,7 +41364,8 @@ mod tests {
                 4,
                 None,
                 Some((STROKE, 0)),
-                StrokePosition::Inside
+                StrokePosition::Inside,
+                false
             )
             .is_err());
         assert!(doc
@@ -41264,7 +41378,8 @@ mod tests {
                 4,
                 None,
                 Some((STROKE, 251)),
-                StrokePosition::Inside
+                StrokePosition::Inside,
+                false
             )
             .is_err());
         assert!(doc
@@ -41277,9 +41392,156 @@ mod tests {
                 4,
                 None,
                 Some((STROKE, 1)),
-                StrokePosition::Outside
+                StrokePosition::Outside,
+                false
             )
             .is_ok());
+    }
+
+    #[test]
+    fn round_polygon_corners_fillets_a_selected_vertex_with_a_quarter_edge_radius() {
+        // The apex-(2.5,0)/base-(0,5)-(5,5) triangle other tests already
+        // use: both edges from the apex have the same length
+        // (sqrt(31.25)), so `r = 0.25 * min(d_prev, d_next)` makes the two
+        // Bezier control points exactly a quarter of the way to each
+        // neighbour — apex + 0.25 * (neighbour - apex) — landing at
+        // (1.875, 1.25) toward (0, 5) and (3.125, 1.25) toward (5, 5); the
+        // arc's own midpoint (t = 0.5, halfway between the two SAMPLES=6
+        // steps) lands at (2.5, 0.625). Hand-computed and cross-checked
+        // against an independent Python port of the same quadratic-Bezier
+        // arithmetic.
+        let vertices = [(2.5_f32, 0.0), (5.0, 5.0), (0.0, 5.0)];
+        let rounded = round_polygon_corners(&vertices, |i| i == 0);
+        assert_eq!(rounded.len(), 7 + 2); // 7 arc samples for vertex 0, 2 untouched
+        let close =
+            |p: (f32, f32), q: (f32, f32)| (p.0 - q.0).abs() < 1e-4 && (p.1 - q.1).abs() < 1e-4;
+        assert!(close(rounded[0], (1.875, 1.25)));
+        assert!(close(rounded[3], (2.5, 0.625)));
+        assert!(close(rounded[6], (3.125, 1.25)));
+        assert_eq!(rounded[7], (5.0, 5.0));
+        assert_eq!(rounded[8], (0.0, 5.0));
+    }
+
+    #[test]
+    fn round_polygon_corners_only_rounds_the_vertices_should_round_selects() {
+        // A 4x4 square: `should_round` picks vertices 0 and 2 (7 arc
+        // samples each), leaving 1 and 3 untouched (1 point each) — the
+        // exact per-vertex selection the Star tool's own independent
+        // Smooth Corners/Smooth Indents toggles rely on.
+        let vertices = [(0.0_f32, 0.0), (4.0, 0.0), (4.0, 4.0), (0.0, 4.0)];
+        let rounded = round_polygon_corners(&vertices, |i| i % 2 == 0);
+        assert_eq!(rounded.len(), 7 + 1 + 7 + 1);
+        assert_eq!(rounded[7], (4.0, 0.0));
+        assert_eq!(rounded[15], (0.0, 4.0));
+    }
+
+    #[test]
+    fn draw_triangle_with_smooth_cuts_the_sharp_apex() {
+        // The same apex triangle: rounding all three corners removes
+        // exactly the apex's own pixel (row 0), the base corners' own
+        // rounding too subtle at this resolution to shift any other
+        // pixel — cross-checked against an independent Python port of
+        // point_in_polygon over the smoothed vertex list.
+        let (mut doc, id) = blank_5x5();
+        doc.draw_triangle_with(
+            id,
+            5.0,
+            5.0,
+            0.0,
+            0.0,
+            Some(FILL),
+            None,
+            StrokePosition::Inside,
+            true,
+        )
+        .unwrap();
+        assert_eq!(
+            shape_grid(&doc, id),
+            [".....", "..F..", ".FFF.", ".FFF.", "FFFFF"]
+        );
+    }
+
+    #[test]
+    fn draw_polygon_with_smooth_cuts_all_four_sharp_points() {
+        // polygon_tool_paints_a_diamond_from_its_centre's own diamond,
+        // smoothed: all four points are cut off, leaving a small square
+        // — cross-checked against an independent Python port.
+        let (mut doc, id) = blank_5x5();
+        doc.draw_polygon_with(
+            id,
+            2.5,
+            2.5,
+            2.5,
+            0.3,
+            4,
+            Some(FILL),
+            None,
+            StrokePosition::Inside,
+            true,
+        )
+        .unwrap();
+        assert_eq!(
+            shape_grid(&doc, id),
+            [".....", ".FFF.", ".FFF.", ".FFF.", "....."]
+        );
+    }
+
+    #[test]
+    fn draw_star_with_smooth_indents_rounds_the_inner_notch_independently_of_the_outer_points() {
+        // star_tool_paints_a_three_pointed_star's own star: Smooth
+        // Indents alone fills in a pixel at the inner notch (row 3);
+        // Smooth Corners alone leaves this particular star pixel-for-
+        // pixel identical to the sharp one — its outer tips are already
+        // one-pixel spikes too thin for a quarter-edge rounding to shift
+        // at this resolution — proving the two toggles act independently
+        // rather than one silently doing the other's job. Cross-checked
+        // against an independent Python port.
+        let mut doc = Document::new(7, 7).unwrap();
+        let id = doc
+            .add_layer("l", &solid(7, 7, [0, 0, 0, 0]), 7, 7)
+            .unwrap();
+        doc.draw_star_with(
+            id,
+            3.5,
+            3.9,
+            3.5,
+            0.6,
+            3,
+            30,
+            Some(FILL),
+            None,
+            StrokePosition::Inside,
+            true,
+            false,
+        )
+        .unwrap();
+        assert_eq!(
+            shape_grid(&doc, id),
+            [".......", "...F...", "...F...", "...F...", "..FFF..", ".......", "......."]
+        );
+        let mut doc = Document::new(7, 7).unwrap();
+        let id = doc
+            .add_layer("l", &solid(7, 7, [0, 0, 0, 0]), 7, 7)
+            .unwrap();
+        doc.draw_star_with(
+            id,
+            3.5,
+            3.9,
+            3.5,
+            0.6,
+            3,
+            30,
+            Some(FILL),
+            None,
+            StrokePosition::Inside,
+            false,
+            true,
+        )
+        .unwrap();
+        assert_eq!(
+            shape_grid(&doc, id),
+            [".......", "...F...", "...F...", "..FFF..", "..FFF..", ".......", "......."]
+        );
     }
 
     /// The Levels formula, cross-checked in Python with f32 emulation:

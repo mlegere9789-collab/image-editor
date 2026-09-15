@@ -4766,7 +4766,8 @@ fn draw_line(
 
 /// Polygon tool (Pixels mode): paint a regular polygon dragged out from
 /// its centre, with an optional fill and/or stroke at Photoshop's own
-/// Inside, Center, or Outside stroke position (defaulting to Inside).
+/// Inside, Center, or Outside stroke position (defaulting to Inside), and
+/// Photoshop's own Smooth Corners (defaulting off).
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 fn draw_polygon(
@@ -4780,6 +4781,7 @@ fn draw_polygon(
     fill: Option<[u8; 4]>,
     stroke: Option<([u8; 4], u32)>,
     position: Option<document::StrokePosition>,
+    smooth: Option<bool>,
 ) -> Result<Snapshot, String> {
     edit(&state, |document| {
         document.draw_polygon_with(
@@ -4792,14 +4794,16 @@ fn draw_polygon(
             fill,
             stroke,
             position.unwrap_or(document::StrokePosition::Inside),
+            smooth.unwrap_or(false),
         )
     })
 }
 
 /// Star tool (Pixels mode): paint a star dragged out from its centre,
-/// with `ratio` percent inner points, an optional fill and/or stroke, and
+/// with `ratio` percent inner points, an optional fill and/or stroke,
 /// Photoshop's own Inside, Center, or Outside stroke position (defaulting
-/// to Inside).
+/// to Inside), and Photoshop's own Smooth Corners/Smooth Indents
+/// (defaulting off).
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 fn draw_star(
@@ -4814,6 +4818,8 @@ fn draw_star(
     fill: Option<[u8; 4]>,
     stroke: Option<([u8; 4], u32)>,
     position: Option<document::StrokePosition>,
+    smooth: Option<bool>,
+    smooth_indents: Option<bool>,
 ) -> Result<Snapshot, String> {
     edit(&state, |document| {
         document.draw_star_with(
@@ -4827,13 +4833,16 @@ fn draw_star(
             fill,
             stroke,
             position.unwrap_or(document::StrokePosition::Inside),
+            smooth.unwrap_or(false),
+            smooth_indents.unwrap_or(false),
         )
     })
 }
 
 /// Triangle tool (Pixels mode): paint the isosceles triangle fitted to a
 /// dragged box, with an optional fill and/or stroke at Photoshop's own
-/// Inside, Center, or Outside stroke position (defaulting to Inside).
+/// Inside, Center, or Outside stroke position (defaulting to Inside), and
+/// Photoshop's own rounded-corner option (defaulting off).
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 fn draw_triangle(
@@ -4846,6 +4855,7 @@ fn draw_triangle(
     fill: Option<[u8; 4]>,
     stroke: Option<([u8; 4], u32)>,
     position: Option<document::StrokePosition>,
+    smooth: Option<bool>,
 ) -> Result<Snapshot, String> {
     edit(&state, |document| {
         document.draw_triangle_with(
@@ -4857,6 +4867,7 @@ fn draw_triangle(
             fill,
             stroke,
             position.unwrap_or(document::StrokePosition::Inside),
+            smooth.unwrap_or(false),
         )
     })
 }
