@@ -7066,18 +7066,48 @@ impl Document {
     /// Photoshop's own Scale, Angle, and Link-with-Layer options are a
     /// documented scope cut. Errors when no pattern has been defined.
     pub fn add_pattern_layer(&mut self, name: impl Into<String>) -> Result<LayerId, String> {
+        self.add_pattern_layer_with(name, 100)
+    }
+
+    /// [`Self::add_pattern_layer`] with Photoshop's own Scale option: the
+    /// pattern tile resized by `scale` percent before tiling, the same
+    /// [`Self::tiled_pattern_pixels`] helper [`Fill::PatternScaled`]'s own
+    /// `render_fill` arm uses. At `scale: 100` this is pixel-identical to
+    /// [`Self::add_pattern_layer`]. See README Phases 144 and 398.
+    pub fn add_pattern_layer_with(
+        &mut self,
+        name: impl Into<String>,
+        scale: u32,
+    ) -> Result<LayerId, String> {
+        let pixels = self.tiled_pattern_pixels(scale)?;
+        self.add_layer(name, &pixels, self.width, self.height)
+    }
+
+    /// The defined pattern tiled across the whole canvas, its tile
+    /// resized by `scale` percent (nearest-neighbour, `10..=400`) before
+    /// tiling from the top-left corner. Shared by [`Self::add_pattern_layer_with`]
+    /// and [`Fill::PatternScaled`]'s own `render_fill` arm.
+    fn tiled_pattern_pixels(&self, scale: u32) -> Result<Vec<u8>, String> {
+        if !(10..=400).contains(&scale) {
+            return Err("Pattern scale must be between 10 and 400.".to_string());
+        }
         let pattern = self.pattern.as_ref().ok_or_else(|| {
             "No pattern has been defined yet (Edit > Define Pattern).".to_string()
         })?;
         let (pw, ph) = (pattern.width as usize, pattern.height as usize);
+        let factor = scale as f32 / 100.0;
+        let tile_w = ((pw as f32 * factor).round() as usize).max(1);
+        let tile_h = ((ph as f32 * factor).round() as usize).max(1);
         let mut pixels = Vec::with_capacity(self.buffer_len());
         for y in 0..self.height as usize {
             for x in 0..self.width as usize {
-                let src = ((y % ph) * pw + (x % pw)) * CHANNELS;
+                let src_x = (((x % tile_w) as f32 / factor) as usize).min(pw - 1);
+                let src_y = (((y % tile_h) as f32 / factor) as usize).min(ph - 1);
+                let src = (src_y * pw + src_x) * CHANNELS;
                 pixels.extend_from_slice(&pattern.pixels[src..src + CHANNELS]);
             }
         }
-        self.add_layer(name, &pixels, self.width, self.height)
+        Ok(pixels)
     }
 
     /// Replace the selection with an axis-aligned rectangle spanning the two
@@ -10139,26 +10169,7 @@ impl Document {
                 }
             }
             Fill::PatternScaled { scale } => {
-                if !(10..=400).contains(&scale) {
-                    return Err("Pattern Fill scale must be between 10 and 400.".to_string());
-                }
-                let pattern = self.pattern.as_ref().ok_or_else(|| {
-                    "No pattern has been defined yet (Edit > Define Pattern).".to_string()
-                })?;
-                let (pw, ph) = (pattern.width as usize, pattern.height as usize);
-                let factor = scale as f32 / 100.0;
-                let tile_w = ((pw as f32 * factor).round() as usize).max(1);
-                let tile_h = ((ph as f32 * factor).round() as usize).max(1);
-                for y in 0..self.height as usize {
-                    for x in 0..self.width as usize {
-                        let src_x = (((x % tile_w) as f32 / factor) as usize).min(pw - 1);
-                        let src_y = (((y % tile_h) as f32 / factor) as usize).min(ph - 1);
-                        let src = (src_y * pw + src_x) * CHANNELS;
-                        let dst = (y * self.width as usize + x) * CHANNELS;
-                        pixels[dst..dst + CHANNELS]
-                            .copy_from_slice(&pattern.pixels[src..src + CHANNELS]);
-                    }
-                }
+                pixels = self.tiled_pattern_pixels(scale)?;
             }
         }
         Ok(pixels)
@@ -54532,6 +54543,46 @@ mod tests {
         assert!(p.chunks_exact(4).all(|px| px[3] == 255));
         // The source layer is untouched.
         assert_eq!(doc.layers()[0].pixels, ramped_3x3().0.layers()[0].pixels);
+    }
+
+    #[test]
+    fn add_pattern_layer_with_scale_stretches_the_tile_before_repeating() {
+        // Same 2x2 tile (20 30 / 50 60) and 3x3 canvas as the plain
+        // top-left-tiling test, but at 200%: the tile grows to 4x4 --
+        // bigger than the whole canvas -- so every destination pixel maps
+        // back to source column/row (x / 2, y / 2), truncated: columns
+        // 0 and 1 both read the tile's own column 0, column 2 reads
+        // column 1; same down the rows. In contrast with the plain
+        // function's own wrap-around grid (20 30 20 / 50 60 50 / 20 30
+        // 20), this one never wraps at all within the canvas.
+        let (mut doc, id) = ramped_3x3();
+        doc.select_rectangle(1.0, 0.0, 3.0, 2.0).unwrap();
+        doc.define_pattern(id).unwrap();
+        doc.deselect();
+        let fill = doc.add_pattern_layer_with("Pattern Fill 1", 200).unwrap();
+        let p = &doc.layers()[1].pixels;
+        assert_eq!(doc.layers()[1].id, fill);
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let grid: Vec<Vec<u8>> = (0..3)
+            .map(|y| (0..3).map(|x| p[idx(x, y)]).collect())
+            .collect();
+        assert_eq!(
+            grid,
+            vec![vec![20, 20, 30], vec![20, 20, 30], vec![50, 50, 60]]
+        );
+        // At 100% this is exactly add_pattern_layer.
+        let (mut doc2, id2) = ramped_3x3();
+        doc2.select_rectangle(1.0, 0.0, 3.0, 2.0).unwrap();
+        doc2.define_pattern(id2).unwrap();
+        doc2.deselect();
+        let plain = doc2.add_pattern_layer("plain").unwrap();
+        let scaled = doc2.add_pattern_layer_with("scaled", 100).unwrap();
+        assert_eq!(
+            doc2.layer(plain).unwrap().pixels,
+            doc2.layer(scaled).unwrap().pixels
+        );
+        assert!(doc.add_pattern_layer_with("bad", 9).is_err());
+        assert!(doc.add_pattern_layer_with("bad2", 401).is_err());
     }
 
     #[test]

@@ -7630,9 +7630,11 @@ fn define_pattern(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, S
 /// Layer > New Fill Layer > Pattern: add a new top layer tiled with the
 /// document's defined pattern. Always named "Pattern Fill 1".
 #[tauri::command]
-fn add_pattern_layer(state: State<'_, AppState>) -> Result<Snapshot, String> {
+fn add_pattern_layer(state: State<'_, AppState>, scale: u32) -> Result<Snapshot, String> {
     edit_checkpointed(&state, |document| {
-        document.add_pattern_layer("Pattern Fill 1").map(|_| None)
+        document
+            .add_pattern_layer_with("Pattern Fill 1", scale)
+            .map(|_| None)
     })
 }
 

@@ -23326,6 +23326,48 @@ This also closes out the Blend Mode narrowing across every layer style
 Overlay, Gradient Overlay, Pattern Overlay, Satin, Stroke, and now Bevel
 & Emboss's own Highlight and Shadow Modes.
 
+## Phase 398 — Pattern (layer)'s Scale
+
+PATTERN's own "Photoshop's scale/angle/link-with-layer options are a
+documented scope cut" line was the next largest-impact item in
+`docs/PLAN_TO_100.md`'s Phase D backlog, and a direct reuse of Phase
+396's own machinery: `add_pattern_layer` (unchanged, still tiles at
+100%) delegates to a new `add_pattern_layer_with(name, scale)`, and both
+it and `Fill::PatternScaled`'s own `render_fill` arm now share one
+`tiled_pattern_pixels(scale)` helper — the exact resize-then-tile logic
+Phase 396 wrote inline, factored out rather than duplicated a second
+time, and re-verified against Phase 396's own `fill_pattern_scaled_*`
+tests (still passing unmodified) to prove the refactor changed nothing.
+`add_pattern_layer`'s Tauri command widened to take `scale` directly;
+the one-click "Pattern Fill" toolbar button (this project's own
+simplified stand-in for Photoshop's New Fill Layer dialog, an ordinary
+baked pixel layer rather than a live re-openable fill — see README
+Phase 144) gained an adjacent inline Scale slider, the same
+`tools__slider` toolbar-inline pattern the Brush tip's own Spacing
+slider already uses, rather than a full dialog for a single option.
+Angle and link-with-layer remain documented scope cuts: Pattern's own
+tiling has no rotation concept to begin with, and "layer" here already
+means the whole canvas.
+
+**Verified.** All 5 pre-existing `add_pattern_layer` tests pass
+unmodified, plus both Phase 396 `Fill::PatternScaled` tests, confirming
+the shared-helper refactor is behaviour-preserving. One new
+hand-computed test,
+`add_pattern_layer_with_scale_stretches_the_tile_before_repeating`,
+reuses the existing top-left-tiling test's own fixture (a 3×3 canvas, a
+2×2 tile reading `20, 30 / 50, 60`): at 200% the tile grows to 4×4 —
+bigger than the whole canvas — so every destination pixel maps back by
+truncated `(x / 2, y / 2)` with no wrap-around at all, reading `20, 20,
+30 / 20, 20, 30 / 50, 50, 60`, in contrast with the plain function's own
+wrapping grid (`20, 30, 20 / 50, 60, 50 / 20, 30, 20`) — plus a
+100%-matches-`add_pattern_layer`-exactly case and two range-validation
+cases. `cargo fmt`/`clippy --all-targets -D warnings`/`test` and
+`npm run build`/`test`/`tsc --noEmit` all clean.
+
+Tests: 1912 Rust (1911 → 1912), 33 frontend (unchanged — a toolbar
+slider, no dedicated frontend test suite for the toolbar's plain
+buttons).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

@@ -1778,6 +1778,7 @@ export default function App() {
   });
   const strokeSeed = useRef(1);
   const [tipSpacing, setTipSpacing] = useState(4);
+  const [patternFillScale, setPatternFillScale] = useState(100);
   // Gradient / Pattern / Adjustment Presets: the dialog and a name field.
   const [showPresetsDialog, setShowPresetsDialog] = useState(false);
   const [presetName, setPresetName] = useState("");
@@ -12164,12 +12165,29 @@ export default function App() {
         </button>
         <button
           className="button button--quiet"
-          onClick={() => void runCommand("add_pattern_layer")}
+          onClick={() =>
+            void runCommand("add_pattern_layer", { scale: patternFillScale })
+          }
           disabled={busy || !hasDocument || !(document?.hasPattern ?? false)}
-          title="Layer > New Fill Layer > Pattern (tiles the pattern captured by Define Pattern)"
+          title="Layer > New Fill Layer > Pattern (tiles the pattern captured by Define Pattern, resized by Scale)"
         >
           Pattern Fill
         </button>
+        <label
+          className="tools__slider"
+          title="Pattern Fill's own Scale: resizes the tile before it repeats"
+        >
+          Scale {patternFillScale}%
+          <input
+            type="range"
+            min={10}
+            max={400}
+            value={patternFillScale}
+            onChange={(event) =>
+              setPatternFillScale(Number(event.target.value))
+            }
+          />
+        </label>
         <button
           title="File > Export > Export PNG…"
           className="button button--quiet"
