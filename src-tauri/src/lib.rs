@@ -1447,11 +1447,16 @@ fn save_selection(state: State<'_, AppState>, name: String) -> Result<Snapshot, 
     })
 }
 
-/// Select > Load Selection: replace the selection with the one saved as `name`.
+/// Select > Load Selection: replace (or, per `mode`, Add to/Subtract
+/// from/Intersect with) the selection with the one saved as `name`.
 #[tauri::command]
-fn load_selection(state: State<'_, AppState>, name: String) -> Result<Snapshot, String> {
+fn load_selection(
+    state: State<'_, AppState>,
+    name: String,
+    mode: Option<document::SelectionMode>,
+) -> Result<Snapshot, String> {
     edit_checkpointed(&state, |document| {
-        document.load_selection(&name)?;
+        document.load_selection_with(&name, mode.unwrap_or(document::SelectionMode::New))?;
         Ok(None)
     })
 }

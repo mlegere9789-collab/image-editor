@@ -1365,6 +1365,8 @@ export default function App() {
   const [saveSelectionName, setSaveSelectionName] = useState("Selection 1");
   const [showLoadSelectionDialog, setShowLoadSelectionDialog] = useState(false);
   const [loadSelectionName, setLoadSelectionName] = useState("");
+  const [loadSelectionMode, setLoadSelectionMode] =
+    useState<SelectionMode>("new");
   // Image > Calculations: two single-channel sources, a blend, opacity, an
   // optional mask, and where the grey result goes.
   const [showCalculationsDialog, setShowCalculationsDialog] = useState(false);
@@ -4036,9 +4038,12 @@ export default function App() {
   }, [document]);
 
   const applyLoadSelection = useCallback(async () => {
-    await runCommand("load_selection", { name: loadSelectionName });
+    await runCommand("load_selection", {
+      name: loadSelectionName,
+      mode: loadSelectionMode,
+    });
     setShowLoadSelectionDialog(false);
-  }, [runCommand, loadSelectionName]);
+  }, [runCommand, loadSelectionName, loadSelectionMode]);
 
   const openLoadChannelDialog = useCallback(() => {
     const names = document?.channels ?? [];
@@ -20402,6 +20407,20 @@ export default function App() {
                     {name}
                   </option>
                 ))}
+              </select>
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Operation</span>
+              <select
+                value={loadSelectionMode}
+                onChange={(event) =>
+                  setLoadSelectionMode(event.target.value as SelectionMode)
+                }
+              >
+                <option value="new">New Selection</option>
+                <option value="add">Add to Selection</option>
+                <option value="subtract">Subtract from Selection</option>
+                <option value="intersect">Intersect with Selection</option>
               </select>
             </label>
             <div className="modal__actions">

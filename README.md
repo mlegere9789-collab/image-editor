@@ -23554,6 +23554,46 @@ warnings`/`test` and `npm run build`/`test`/`tsc --noEmit` all clean.
 Tests: 1916 Rust (1915 → 1916), 33 frontend (unchanged — one checkbox,
 no dedicated frontend test suite for the options bar's plain controls).
 
+## Phase 403 — Load Selection's Add/Subtract/Intersect
+
+SAVE SELECTION's own "Load's Add/Subtract/Intersect operations are
+documented scope cuts" line was the next largest-impact item in
+`docs/PLAN_TO_100.md`'s Phase D backlog. `load_selection` (unchanged,
+still "New Selection") delegates to a new `load_selection_with(name,
+mode: SelectionMode)`, the same plain-function-plus-`_with`-sibling
+shape used throughout this project. Rather than hand-rolling the
+combine logic a second time, the new function reuses `combine_with` —
+the same general selection-mode combinator every other selection tool's
+own `_with` sibling already calls — passing it the saved selection
+directly; at `SelectionMode::New`, `combine_with` itself replaces the
+active selection outright without touching the old one, so this is
+provably identical to the plain function's own prior body (which did
+exactly that by hand). No test call sites needed updating: every one of
+the 11 existing `load_selection` calls in this project's own test suite
+already goes through the unchanged plain function. `load_selection`'s
+Tauri command widened to take an optional `mode` (defaulting to New).
+The frontend's Load Selection dialog gained an Operation dropdown (New
+Selection/Add to Selection/Subtract from Selection/Intersect with
+Selection) with its own dedicated state, deliberately not reusing the
+global `selectionMode` the live selection tools already share, since a
+modal dialog's own choice shouldn't silently follow whatever tool state
+happens to be set from an unrelated selection made earlier.
+
+**Verified.** All 3 pre-existing Save/Load Selection tests pass
+completely unmodified. One new hand-computed test,
+`load_selection_with_adds_subtracts_and_intersects`, builds two saved
+selections on a 4×1 canvas with one column of overlap — "a" (columns 0,
+1), "b" (columns 1, 2) — and chains all three new operations: Add
+starting from "a" and adding "b" unions to columns (0, 1, 2); Subtract
+then removing "a" leaves only column 2; Intersect starting fresh from
+"b" and intersecting "a" keeps only their shared column, 1 — each value
+computed by hand before running and confirmed exactly on the first try.
+`cargo fmt`/`clippy --all-targets -D warnings`/`test` and
+`npm run build`/`test`/`tsc --noEmit` all clean.
+
+Tests: 1917 Rust (1916 → 1917), 33 frontend (unchanged — one dropdown
+added to the Load Selection dialog, no new test file needed).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

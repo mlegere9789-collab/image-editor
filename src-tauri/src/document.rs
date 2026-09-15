@@ -9354,19 +9354,28 @@ impl Document {
     }
 
     /// Select > Load Selection: replaces the active selection with the one
-    /// saved under `name` (Photoshop's "New Selection" operation; its
-    /// Add/Subtract/Intersect operations are documented scope cuts for
-    /// now). Errors when no selection of that name has been saved. Works
-    /// with or without a current selection.
+    /// saved under `name` (Photoshop's "New Selection" operation). Errors
+    /// when no selection of that name has been saved. Works with or
+    /// without a current selection.
     pub fn load_selection(&mut self, name: &str) -> Result<(), String> {
+        self.load_selection_with(name, SelectionMode::New)
+    }
+
+    /// [`Self::load_selection`] with Photoshop's own Add to
+    /// Selection/Subtract from Selection/Intersect with Selection
+    /// operations, through the same [`Self::combine_with`] every other
+    /// selection tool's own `_with` sibling already uses. At
+    /// `SelectionMode::New` this is pixel-identical to `load_selection`,
+    /// since `combine_with` itself replaces the selection outright for
+    /// that mode without touching the current one.
+    pub fn load_selection_with(&mut self, name: &str, mode: SelectionMode) -> Result<(), String> {
         let saved = self
             .saved_selections
             .iter()
             .find(|(n, _)| n == name.trim())
             .map(|(_, s)| s.clone())
             .ok_or_else(|| format!("No selection named \"{}\" has been saved.", name.trim()))?;
-        self.selection = Some(saved);
-        Ok(())
+        self.combine_with(mode, saved)
     }
 
     /// The names `save_selection` has stored, in the order first saved.
@@ -55681,6 +55690,34 @@ mod tests {
                 y1: 1
             }
         );
+    }
+
+    #[test]
+    fn load_selection_with_adds_subtracts_and_intersects() {
+        // A 4x1 canvas, "a" = columns 0-1, "b" = columns 1-2 -- one
+        // column of overlap.
+        let mut doc = Document::new(4, 1).unwrap();
+        doc.select_rectangle(0.0, 0.0, 2.0, 1.0).unwrap();
+        doc.save_selection("a").unwrap();
+        doc.select_rectangle(1.0, 0.0, 3.0, 1.0).unwrap();
+        doc.save_selection("b").unwrap();
+        // Add: starting from "a" (0, 1), adding "b" (1, 2) unions to
+        // (0, 1, 2).
+        doc.load_selection("a").unwrap();
+        doc.load_selection_with("b", SelectionMode::Add).unwrap();
+        let mut got = selected_pixels(&doc);
+        got.sort();
+        assert_eq!(got, vec![(0, 0), (1, 0), (2, 0)]);
+        // Subtract: from (0, 1, 2), subtracting "a" (0, 1) leaves only 2.
+        doc.load_selection_with("a", SelectionMode::Subtract)
+            .unwrap();
+        assert_eq!(selected_pixels(&doc), vec![(2, 0)]);
+        // Intersect: starting from "b" (1, 2), intersecting "a" (0, 1)
+        // keeps only their shared column, 1.
+        doc.load_selection("b").unwrap();
+        doc.load_selection_with("a", SelectionMode::Intersect)
+            .unwrap();
+        assert_eq!(selected_pixels(&doc), vec![(1, 0)]);
     }
 
     #[test]
