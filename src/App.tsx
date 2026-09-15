@@ -49,6 +49,7 @@ import {
 } from "./actions";
 import type {
   Adjustment,
+  AlignMode,
   ProgressEvent,
   BrushDynamics,
   Interpolation,
@@ -15425,6 +15426,43 @@ export default function App() {
               </select>
             </label>
           )}
+          {tool === "move" &&
+            (
+              [
+                ["left", "Align Left Edges"],
+                ["horizontalCenters", "Align Horizontal Centers"],
+                ["right", "Align Right Edges"],
+                ["top", "Align Top Edges"],
+                ["verticalCenters", "Align Vertical Centers"],
+                ["bottom", "Align Bottom Edges"],
+              ] as [AlignMode, string][]
+            ).map(([align, label]) => (
+              <button
+                key={align}
+                className="button button--quiet"
+                onClick={() => {
+                  if (!document || selectedId === null) return;
+                  const ids = Array.from(
+                    new Set([
+                      selectedId,
+                      ...document.layers
+                        .filter((l) => l.linked)
+                        .map((l) => l.id),
+                    ]),
+                  );
+                  if (ids.length < 2) return;
+                  void runCommand("align_layers", { ids, align });
+                }}
+                disabled={
+                  busy ||
+                  !canPaint ||
+                  1 + (document?.layers.filter((l) => l.linked).length ?? 0) < 2
+                }
+                title={`Move > Align: ${label.toLowerCase()} of the selected layer and every linked layer`}
+              >
+                {label}
+              </button>
+            ))}
           {tool === "magneticLasso" && (
             <>
               <label className="tools__slider">

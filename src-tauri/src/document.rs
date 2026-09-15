@@ -5400,6 +5400,20 @@ pub enum MoveDirection {
     Down,
 }
 
+/// The Move tool's own alignment buttons: which edge or centre of every
+/// layer [`Document::align_layers`] is given lines up with their shared
+/// bounds — see that method for the exact geometry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AlignMode {
+    Left,
+    HorizontalCenters,
+    Right,
+    Top,
+    VerticalCenters,
+    Bottom,
+}
+
 /// Everything a layer carries besides its pixels and the fields the
 /// project manifest has always saved -- the records project format
 /// version 2 keeps, so a reopened text layer is still type, a smart
@@ -28287,8 +28301,9 @@ impl Document {
     /// entirely. Pixels pushed off the canvas are lost. A zero move does
     /// nothing and returns `None`; otherwise the whole canvas is reported
     /// dirty. Errors on a locked or unknown layer before touching anything.
-    /// Photoshop's Auto-Select, Show Transform Controls, and alignment
-    /// buttons are documented scope cuts.
+    /// Auto-Select (the frontend's own hit-testing before the drag starts)
+    /// and Show Transform Controls are shipped; the alignment buttons are
+    /// [`Self::align_layers`].
     pub fn move_pixels(&mut self, id: LayerId, dx: i32, dy: i32) -> Result<Option<Rect>, String> {
         if dx == 0 && dy == 0 {
             self.layer(id)?;
@@ -28327,6 +28342,81 @@ impl Document {
             self.selection = None;
         }
         Ok(Some(everything))
+    }
+
+    /// Move tool's own alignment buttons: aligns every layer in `ids`
+    /// (at least two) to `align`'s own edge or centre of their shared
+    /// bounding box — the union of each one's own [`Self::layer_bounds`].
+    /// Each layer moves independently by [`Self::translate`], never
+    /// [`Self::move_pixels`]'s own linked-group-follows-along or
+    /// selection-lifts-a-region behaviour, since aligning is about every
+    /// layer in `ids` reaching the same shared line on its own, not a
+    /// drag. `HorizontalCenters`/`VerticalCenters` divide the centre
+    /// offset by two with Rust's own truncating integer division (toward
+    /// zero), so an odd-pixel offset rounds the same way `i32` division
+    /// always does. A layer with no opaque pixels at all has no edge to
+    /// align and is skipped, not an error, the same way a fully
+    /// transparent layer sits out of Photoshop's own alignment. Errors
+    /// with fewer than two `ids`, an unknown or locked layer among them
+    /// (checked before any move touches anything), or every one of them
+    /// fully transparent.
+    pub fn align_layers(
+        &mut self,
+        ids: &[LayerId],
+        align: AlignMode,
+    ) -> Result<Option<Rect>, String> {
+        if ids.len() < 2 {
+            return Err("Align needs at least two layers.".to_string());
+        }
+        let mut bounds = Vec::with_capacity(ids.len());
+        for &id in ids {
+            let layer = self.layer(id)?;
+            if layer.locked {
+                return Err(format!("Layer \"{}\" is locked.", layer.name));
+            }
+            bounds.push((id, self.layer_bounds(id)?));
+        }
+        let present: Vec<(LayerId, Rect)> = bounds
+            .into_iter()
+            .filter_map(|(id, b)| b.map(|r| (id, r)))
+            .collect();
+        if present.is_empty() {
+            return Err("None of those layers has any pixels to align.".to_string());
+        }
+        let (mut ux0, mut uy0, mut ux1, mut uy1) = (u32::MAX, u32::MAX, 0u32, 0u32);
+        for (_, r) in &present {
+            ux0 = ux0.min(r.x0);
+            uy0 = uy0.min(r.y0);
+            ux1 = ux1.max(r.x1);
+            uy1 = uy1.max(r.y1);
+        }
+        let mut dirty = false;
+        for (id, r) in present {
+            let (dx, dy): (i32, i32) = match align {
+                AlignMode::Left => (ux0 as i32 - r.x0 as i32, 0),
+                AlignMode::Right => (ux1 as i32 - r.x1 as i32, 0),
+                AlignMode::HorizontalCenters => (
+                    ((ux0 as i64 + ux1 as i64) - (r.x0 as i64 + r.x1 as i64)) as i32 / 2,
+                    0,
+                ),
+                AlignMode::Top => (0, uy0 as i32 - r.y0 as i32),
+                AlignMode::Bottom => (0, uy1 as i32 - r.y1 as i32),
+                AlignMode::VerticalCenters => (
+                    0,
+                    ((uy0 as i64 + uy1 as i64) - (r.y0 as i64 + r.y1 as i64)) as i32 / 2,
+                ),
+            };
+            if dx != 0 || dy != 0 {
+                self.translate(id, dx, dy)?;
+                dirty = true;
+            }
+        }
+        Ok(dirty.then_some(Rect {
+            x0: 0,
+            y0: 0,
+            x1: self.width,
+            y1: self.height,
+        }))
     }
 
     /// [`Self::move_pixels`]'s pixel half for one layer: the pixels under
@@ -54219,6 +54309,100 @@ mod tests {
             vec![vec![40, 50, 60], vec![70, 80, 90], vec![0, 0, 0]]
         );
         assert_eq!(pixel(&doc, id, 1, 2), [0, 0, 0, 0]);
+    }
+
+    /// A 10×10 document with a 2×2 opaque block at `(1, 1)`..`(3, 3)` on
+    /// layer `a` and a 4×4 opaque block at `(5, 6)`..`(9, 10)` on layer
+    /// `b` — their union bounds are `(1, 1)`..`(9, 10)`.
+    fn two_blocks() -> (Document, LayerId, LayerId) {
+        let mut doc = Document::new(10, 10).unwrap();
+        let a = doc
+            .add_layer("a", &solid(10, 10, [0, 0, 0, 0]), 10, 10)
+            .unwrap();
+        doc.draw_rectangle(a, 1.0, 1.0, 3.0, 3.0, 0, Some([255, 0, 0, 255]), None)
+            .unwrap();
+        let b = doc
+            .add_layer("b", &solid(10, 10, [0, 0, 0, 0]), 10, 10)
+            .unwrap();
+        doc.draw_rectangle(b, 5.0, 6.0, 9.0, 10.0, 0, Some([0, 0, 255, 255]), None)
+            .unwrap();
+        (doc, a, b)
+    }
+
+    #[test]
+    fn align_layers_left_right_top_and_bottom_move_to_the_shared_edge() {
+        let (mut doc, a, b) = two_blocks();
+        doc.align_layers(&[a, b], AlignMode::Left).unwrap();
+        assert_eq!(doc.layer_bounds(a).unwrap().unwrap().x0, 1); // already there
+        assert_eq!(doc.layer_bounds(b).unwrap().unwrap().x0, 1); // 5 -> 1
+
+        let (mut doc, a, b) = two_blocks();
+        doc.align_layers(&[a, b], AlignMode::Right).unwrap();
+        assert_eq!(doc.layer_bounds(a).unwrap().unwrap().x1, 9); // 3 -> 9
+        assert_eq!(doc.layer_bounds(b).unwrap().unwrap().x1, 9); // already there
+
+        let (mut doc, a, b) = two_blocks();
+        doc.align_layers(&[a, b], AlignMode::Top).unwrap();
+        assert_eq!(doc.layer_bounds(a).unwrap().unwrap().y0, 1); // already there
+        assert_eq!(doc.layer_bounds(b).unwrap().unwrap().y0, 1); // 6 -> 1
+
+        let (mut doc, a, b) = two_blocks();
+        doc.align_layers(&[a, b], AlignMode::Bottom).unwrap();
+        assert_eq!(doc.layer_bounds(a).unwrap().unwrap().y1, 10); // 3 -> 10
+        assert_eq!(doc.layer_bounds(b).unwrap().unwrap().y1, 10); // already there
+    }
+
+    #[test]
+    fn align_layers_centers_divide_the_shift_by_two_and_truncate_toward_zero() {
+        // Union x: min(1, 5) = 1, max(3, 9) = 9 -> centre line 2*x = 10.
+        // Layer a (x0=1, x1=3, 2*centre=4): shift (10-4)/2 = 3 -> x0 = 4.
+        // Layer b (x0=5, x1=9, 2*centre=14): shift (10-14)/2 = -4/2 = -2
+        // exactly -> x0 = 3. Both real centres land on x = 5 (10/2) since
+        // this pair's own combined width divides evenly -- Rust's
+        // truncating i32 division only rounds an *odd* difference, which
+        // neither shift here is.
+        let (mut doc, a, b) = two_blocks();
+        doc.align_layers(&[a, b], AlignMode::HorizontalCenters)
+            .unwrap();
+        assert_eq!(doc.layer_bounds(a).unwrap().unwrap().x0, 4);
+        assert_eq!(doc.layer_bounds(b).unwrap().unwrap().x0, 3);
+
+        // Union y: min(1, 6) = 1, max(3, 10) = 10 -> centre line 2*y = 11
+        // (odd, so the /2 below must truncate for at least one layer).
+        // Layer a (y0=1, y1=3, 2*centre=4): shift (11-4)/2 = 7/2 = 3
+        // (truncated from 3.5) -> y0 = 4. Layer b (y0=6, y1=10,
+        // 2*centre=16): shift (11-16)/2 = -5/2 = -2 (truncated toward
+        // zero from -2.5, not floored to -3) -> y0 = 4.
+        let (mut doc, a, b) = two_blocks();
+        doc.align_layers(&[a, b], AlignMode::VerticalCenters)
+            .unwrap();
+        assert_eq!(doc.layer_bounds(a).unwrap().unwrap().y0, 4);
+        assert_eq!(doc.layer_bounds(b).unwrap().unwrap().y0, 4);
+    }
+
+    #[test]
+    fn align_layers_validates_and_skips_a_fully_transparent_layer() {
+        let (mut doc, a, b) = two_blocks();
+        assert!(doc.align_layers(&[a], AlignMode::Left).is_err());
+        assert!(doc.align_layers(&[a, a + 100], AlignMode::Left).is_err());
+        doc.set_locked(b, true).unwrap();
+        assert!(doc.align_layers(&[a, b], AlignMode::Left).is_err());
+        assert_eq!(doc.layer_bounds(a).unwrap().unwrap().x0, 1); // untouched
+        doc.set_locked(b, false).unwrap();
+
+        // A third, fully transparent layer sits out rather than erroring.
+        let empty = doc
+            .add_layer("empty", &solid(10, 10, [0, 0, 0, 0]), 10, 10)
+            .unwrap();
+        doc.align_layers(&[a, b, empty], AlignMode::Left).unwrap();
+        assert_eq!(doc.layer_bounds(b).unwrap().unwrap().x0, 1);
+        assert_eq!(doc.layer_bounds(empty).unwrap(), None);
+
+        // Every layer transparent errors instead.
+        let empty2 = doc
+            .add_layer("empty2", &solid(10, 10, [0, 0, 0, 0]), 10, 10)
+            .unwrap();
+        assert!(doc.align_layers(&[empty, empty2], AlignMode::Left).is_err());
     }
 
     /// A 12×12 layer of varied opaque colour with a transparent ring.

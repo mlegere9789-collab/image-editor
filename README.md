@@ -24080,6 +24080,64 @@ Tests: 1928 Rust (1926 → 1928), 36 frontend (unchanged — a slider and a
 checkbox reusing the existing Focus Area dialog's own shape need no new
 test file).
 
+## Phase 413 — Move Tool's Alignment Buttons
+
+MOVE TOOL's own "Auto-Select and the alignment buttons are documented
+scope cuts" line was next in `docs/PLAN_TO_100.md`'s Phase D backlog —
+and, the same shape Phase 412's own doc fix took, half of it was already
+stale: Auto-Select (`Document::layer_at`/`group_at`, the frontend's own
+hit-test before a drag starts) has been fully shipped since Phase 214,
+the row simply never updated to say so. The alignment buttons themselves
+were the one genuinely missing piece, so this phase builds those and
+corrects the row in the same pass — the same stray, stale doc comment on
+`move_pixels` itself (naming Auto-Select and Show Transform Controls,
+both long since shipped, as scope cuts) corrected alongside it.
+
+A new `Document::align_layers(ids: &[LayerId], align: AlignMode)`:
+`AlignMode` is Photoshop's own six — Left, HorizontalCenters, Right, Top,
+VerticalCenters, Bottom. Every layer's own opaque bounding box
+([`Self::layer_bounds`], already used by Gradient Overlay's Align with
+Layer) is unioned into one shared box, then each layer shifts
+independently — by [`Self::translate`], never `move_pixels`'s own
+linked-group-follows-along or selection-lifts-a-region behaviour, since
+aligning is about every named layer reaching the same shared line on its
+own — to put its own matching edge or centre exactly on that shared
+line. Centring divides the offset by two with Rust's own truncating
+`i32` division (toward zero, not floored), documented plainly rather
+than hidden behind a fancier rounding rule. A layer with no opaque
+pixels at all has no edge to align and is skipped, not an error, the
+same way a fully transparent layer sits out of Photoshop's own
+alignment; every layer transparent, fewer than two layers, or a locked
+or unknown layer among them (checked before any layer moves) all error.
+The Tauri command and the frontend's six new buttons (Move tool's
+options bar, alongside Auto-Select and Show Transform Controls) reuse
+Group Layers' own established `[selectedId, ...linked layer ids]`
+gathering, so "the selected layer and everything linked to it" means the
+same set of layers everywhere in this project that phrase already
+applies.
+
+**Verified.** Three new hand-computed tests, all on a 10×10 document
+with a 2×2 opaque block at `(1, 1)`..`(3, 3)` and a 4×4 block at
+`(5, 6)`..`(9, 10)` (shared bounds `(1, 1)`..`(9, 10)`).
+`align_layers_left_right_top_and_bottom_move_to_the_shared_edge`: Left
+moves the second block's `x0` from 5 to 1 while the first (already
+there) stays; Right, Top, and Bottom each mirror that for their own
+edge. `align_layers_centers_divide_the_shift_by_two_and_truncate_toward_zero`:
+Horizontal Centers' shared centre line `2·x = 10` divides every shift
+evenly here, landing both blocks on `x = 5`; Vertical Centers' shared
+line `2·y = 11` is odd, so one shift truncates from `3.5` to `3` and the
+other from `−2.5` toward zero to `−2` rather than floored to `−3` — both
+still land on `y = 4`, matching Rust's own division rule exactly.
+`align_layers_validates_and_skips_a_fully_transparent_layer`: fewer than
+two layers, an unknown layer, and a locked layer (leaving the unlocked
+one provably untouched) all error; a third, fully transparent layer
+added to the call is skipped rather than erroring, while two fully
+transparent layers alone still error. `cargo fmt`/`clippy --all-targets
+-D warnings`/`test` and `npm run build`/`test`/`tsc --noEmit` all clean.
+
+Tests: 1931 Rust (1928 → 1931), 36 frontend (unchanged — six buttons
+reusing Group Layers' own id-gathering pattern need no new test file).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

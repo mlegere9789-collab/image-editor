@@ -761,6 +761,16 @@ export type Snapshot = HistoryState & {
 
 export type MoveDirection = "up" | "down";
 
+/** Mirrors `AlignMode` in src-tauri/src/document.rs: the Move tool's own
+ * alignment buttons. */
+export type AlignMode =
+  | "left"
+  | "horizontalCenters"
+  | "right"
+  | "top"
+  | "verticalCenters"
+  | "bottom";
+
 /** What a pointer drag on the canvas does: edit the selected layer, or
  * redefine the document's selection. */
 /** The Ruler tool's readout for one drag, in document pixels; the angle is

@@ -1232,6 +1232,17 @@ fn move_pixels(
     edit_checkpointed(&state, |document| document.move_pixels(id, dx, dy))
 }
 
+/// Move tool's own alignment buttons: align every layer in `ids` (at
+/// least two) to `align`'s own edge or centre of their shared bounds.
+#[tauri::command]
+fn align_layers(
+    state: State<'_, AppState>,
+    ids: Vec<LayerId>,
+    align: document::AlignMode,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.align_layers(&ids, align))
+}
+
 /// Patch tool: rebuild the selected pixels of layer `id` from the area
 /// `(dx, dy)` away, matched to their own tone. A whole, discrete action,
 /// so it checkpoints itself.
@@ -8573,6 +8584,7 @@ pub fn run() {
             expand_selection,
             move_selection,
             move_pixels,
+            align_layers,
             patch,
             content_aware_move,
             content_aware_fill,
