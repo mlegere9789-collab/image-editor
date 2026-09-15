@@ -1773,6 +1773,7 @@ export default function App() {
     saturationJitter: 0,
     brightnessJitter: 0,
     purity: 0,
+    textureDepth: 0,
   });
   const strokeSeed = useRef(1);
   const [tipSpacing, setTipSpacing] = useState(4);
@@ -23372,9 +23373,12 @@ export default function App() {
               the jitters below. Color Dynamics (the Brush tool only) jitters
               each dab&apos;s own colour instead: mixed toward the background
               swatch, then its hue/saturation/brightness perturbed, then Purity
-              pushed toward or away from grey. Every jitter at zero, Count 1,
-              Hardness 100 and Purity 0 is the plain stroke laid as dabs in the
-              brush colour.
+              pushed toward or away from grey. Texture (the Brush tool only)
+              scales coverage by the pattern defined in Edit &gt; Define
+              Pattern, tiled the same way Pattern Stamp tiles it — a dark texel
+              blocks paint at full Depth, a light one lets it through. Every
+              jitter at zero, Count 1, Hardness 100, Purity 0 and Texture Depth
+              0 is the plain stroke laid as dabs in the brush colour.
             </p>
             {(
               [
@@ -23409,6 +23413,7 @@ export default function App() {
                   100,
                 ],
                 ["purity", "Color Dynamics: Purity", -100, 100],
+                ["textureDepth", "Texture: Depth (%)", 0, 100],
               ] as [keyof BrushDynamics, string, number, number][]
             ).map(([key, label, min, max]) => (
               <label key={key} className="control">
@@ -23492,6 +23497,7 @@ export default function App() {
                     saturationJitter: 0,
                     brightnessJitter: 0,
                     purity: 0,
+                    textureDepth: 0,
                   }))
                 }
                 title="Back to the plain round brush"

@@ -2679,6 +2679,14 @@ pub struct BrushDynamics {
     pub saturation_jitter: u8,
     pub brightness_jitter: u8,
     pub purity: i8,
+    /// Texture: the pattern captured by Edit > Define Pattern, tiled the
+    /// same way Pattern Stamp tiles it, its own per-pixel luminance
+    /// scaling how much of each covered pixel's coverage actually lands
+    /// -- a dark texel at full Depth blocks the dab almost entirely, a
+    /// light one lets it through unchanged, the classic paper-grain
+    /// look. Zero (the default) skips reading a pattern at all, so a
+    /// stroke with no Texture never needs one defined.
+    pub texture_depth: u8,
 }
 
 impl Default for BrushDynamics {
@@ -2703,6 +2711,7 @@ impl Default for BrushDynamics {
             saturation_jitter: 0,
             brightness_jitter: 0,
             purity: 0,
+            texture_depth: 0,
         }
     }
 }
@@ -2724,6 +2733,7 @@ impl BrushDynamics {
             ("Hue Jitter", self.hue_jitter),
             ("Saturation Jitter", self.saturation_jitter),
             ("Brightness Jitter", self.brightness_jitter),
+            ("Texture Depth", self.texture_depth),
         ] {
             if value > 100 {
                 return Err(format!("{name} must be between 0 and 100 percent."));
@@ -19256,10 +19266,16 @@ impl Document {
         // Copied out before borrowing `self.layers` mutably below — `Selection`
         // is small (an enum plus four `u32`s), so this is cheap per call.
         let selection = self.selection.clone();
-        // Likewise the pattern, only when a stamp stroke needs it.
+        // Likewise the pattern, only when a stamp stroke -- or Brush
+        // Settings' own Texture, on a plain Brush stroke -- needs it.
+        let texture_active =
+            matches!(stroke, Stroke::Brush { .. }) && dynamics.is_some_and(|d| d.texture_depth > 0);
         let pattern = match stroke {
             Stroke::PatternStamp { .. } => Some(self.pattern.clone().ok_or_else(|| {
                 "No pattern has been defined yet (Edit > Define Pattern).".to_string()
+            })?),
+            _ if texture_active => Some(self.pattern.clone().ok_or_else(|| {
+                "Texture needs a pattern defined first (Edit > Define Pattern).".to_string()
             })?),
             _ => None,
         };
@@ -19442,6 +19458,34 @@ impl Document {
                             *slot = c;
                         }
                     }
+                }
+            }
+        }
+
+        // Texture: the defined pattern's own luminance, tiled at each
+        // covered pixel's absolute canvas position exactly as Pattern
+        // Stamp tiles it, scales that pixel's coverage down toward zero
+        // at Depth 100 for a fully dark texel, unchanged for a fully
+        // light one -- applied once here, after the max-coverage contest
+        // among dabs is already settled, since which texel a pixel sees
+        // never depends on which dab happened to win it.
+        if texture_active {
+            let pattern = pattern.as_ref().expect("checked above");
+            let depth = dynamics.expect("texture_active implies Some").texture_depth as f32 / 100.0;
+            for row in 0..box_height {
+                for col in 0..box_width {
+                    let idx = row * box_width + col;
+                    if coverage[idx] <= 0.0 {
+                        continue;
+                    }
+                    let tx = (x0 as usize + col) % pattern.width as usize;
+                    let ty = (y0 as usize + row) % pattern.height as usize;
+                    let src = (ty * pattern.width as usize + tx) * CHANNELS;
+                    let luminance = (0.299 * pattern.pixels[src] as f32
+                        + 0.587 * pattern.pixels[src + 1] as f32
+                        + 0.114 * pattern.pixels[src + 2] as f32)
+                        / 255.0;
+                    coverage[idx] *= 1.0 - depth * (1.0 - luminance);
                 }
             }
         }
@@ -53141,6 +53185,96 @@ mod tests {
                 .stroke_dynamic(id, &points, 4.0, Stroke::Brush { color: fg }, &bad)
                 .is_err());
         }
+    }
+
+    #[test]
+    fn texture_needs_no_pattern_at_depth_zero_but_refuses_without_one_above_it() {
+        let red = [255, 0, 0, 255];
+        let mut doc = Document::new(20, 20).unwrap();
+        let id = doc
+            .add_layer("x", &[0; 20 * 20 * CHANNELS], 20, 20)
+            .unwrap();
+        // No pattern has ever been defined; Depth 0 (the default) must
+        // never go looking for one.
+        assert!(doc
+            .stroke_dynamic(
+                id,
+                &[(10.0, 10.0)],
+                5.0,
+                Stroke::Brush { color: red },
+                &BrushDynamics::default(),
+            )
+            .is_ok());
+        assert!(doc
+            .stroke_dynamic(
+                id,
+                &[(10.0, 10.0)],
+                5.0,
+                Stroke::Brush { color: red },
+                &BrushDynamics {
+                    texture_depth: 1,
+                    ..BrushDynamics::default()
+                },
+            )
+            .is_err());
+    }
+
+    #[test]
+    fn texture_scales_coverage_by_the_defined_patterns_own_luminance() {
+        let red = [255, 0, 0, 255];
+        // A 2x1 pattern: pure black then pure white.
+        let mut source = Document::new(2, 1).unwrap();
+        let src_id = source
+            .add_layer("src", &[0, 0, 0, 255, 255, 255, 255, 255], 2, 1)
+            .unwrap();
+        source.define_pattern(src_id).unwrap();
+        let mut doc = Document::new(40, 1).unwrap();
+        doc.pattern = source.pattern.clone();
+        let id = doc.add_layer("x", &[0; 40 * CHANNELS], 40, 1).unwrap();
+        // A wide single dab (no dynamics beyond Texture) so many tiles of
+        // the 2px pattern fall under it: no jitter, so pixels line up
+        // exactly with the tiled pattern's own black/white columns.
+        doc.stroke_dynamic(
+            id,
+            &[(20.0, 0.5)],
+            20.0,
+            Stroke::Brush { color: red },
+            &BrushDynamics {
+                spacing_percent: 1000,
+                texture_depth: 100,
+                ..BrushDynamics::default()
+            },
+        )
+        .unwrap();
+        let alpha_at = |x: u32| doc.layers()[0].pixels[(x as usize) * CHANNELS + 3];
+        // Even x tiles onto the pattern's black column (luminance 0): Depth
+        // 100 blocks it completely. Odd x tiles onto white (luminance 1):
+        // fully unaffected, painted at whatever the dab's own coverage was.
+        assert_eq!(alpha_at(10), 0, "black texel blocks the dab entirely");
+        assert!(alpha_at(11) > 200, "white texel lets the dab through");
+        // Depth 50 only halves the effect: the black column is dimmed, not
+        // zeroed, and strictly dimmer than the white column beside it.
+        let mut half = Document::new(40, 1).unwrap();
+        half.pattern = source.pattern.clone();
+        let id2 = half.add_layer("x", &[0; 40 * CHANNELS], 40, 1).unwrap();
+        half.stroke_dynamic(
+            id2,
+            &[(20.0, 0.5)],
+            20.0,
+            Stroke::Brush { color: red },
+            &BrushDynamics {
+                spacing_percent: 1000,
+                texture_depth: 50,
+                ..BrushDynamics::default()
+            },
+        )
+        .unwrap();
+        let alpha_at_half = |x: u32| half.layers()[0].pixels[(x as usize) * CHANNELS + 3];
+        assert!(alpha_at_half(10) > 0, "not fully blocked at half depth");
+        assert!(
+            alpha_at_half(10) < alpha_at_half(11),
+            "black column still dimmer than white"
+        );
     }
 
     #[test]

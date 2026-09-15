@@ -22923,6 +22923,43 @@ Tests: 1896 Rust (1894 → 1896), 33 frontend (unchanged — no new frontend
 logic worth a unit test, just wiring five sliders and a colour input
 already-tested code already reads).
 
+## Phase 388 — the Brush tool's Texture
+
+Another of the Brush Tool row's scope cuts closed: Texture, Brush Settings'
+own paper-grain effect. Rather than a new asset type, it reuses the
+pattern Edit > Define Pattern already captures — the same one Pattern
+Stamp tiles — so a texture is just a pattern, exactly as Photoshop's own
+Texture panel lets a Pattern preset double as a paper. `BrushDynamics`
+gains `texture_depth`; when it is above zero on a plain `Stroke::Brush`,
+`stroke_inner` fetches the defined pattern up front (erroring — "Texture
+needs a pattern defined first" — if none exists, the same message shape
+Pattern Stamp's own missing-pattern error already uses) and, once the
+per-pixel coverage grid from every dab's own max-coverage contest is
+settled, runs one more pass over it: each covered pixel's own texel (tiled
+at its absolute canvas position, the identical `% width`/`% height` math
+Pattern Stamp uses) converts to a standard-weights luminance, and coverage
+scales by `1 - depth * (1 - luminance)` — a fully dark texel blocks the
+dab entirely at Depth 100, a fully light one passes it unchanged, and
+Depth 0 skips the whole mechanism (no pattern read, no behaviour change)
+so a Texture-unaware stroke never needs one defined. Every other stroke
+kind — Eraser, Clone, Pattern Stamp itself, the rest — is untouched; this
+new pass only ever runs for `Stroke::Brush`.
+
+**Verified.** Two new Rust tests, hand-computed. The first: Depth 0 paints
+successfully with no pattern ever defined, and Depth above 0 with none
+defined is a real error, not a silent no-op. The second defines a 2×1
+black-then-white pattern, strokes a single wide dab (radius 20, full
+coverage well inside the core) across a 40×1 canvas at Depth 100, and
+checks alpha pixel by pixel: every even x (tiling onto the black texel)
+is exactly 0, every odd x (the white texel) is untouched near 255; a
+second stroke at Depth 50 confirms the black column is only dimmed, not
+zeroed, and stays strictly dimmer than the white column beside it — the
+in-between case, not just the two extremes. `cargo fmt`/`clippy
+--all-targets -D warnings`/`test` and `npm run build`/`test` all clean.
+
+Tests: 1898 Rust (1896 → 1898), 33 frontend (unchanged — one more slider
+wired the same way, no new frontend logic).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
