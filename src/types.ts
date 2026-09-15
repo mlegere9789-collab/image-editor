@@ -166,6 +166,15 @@ export type Fill =
       startColor: [number, number, number, number];
       endColor: [number, number, number, number];
     }
+  | {
+      kind: "gradientStyled";
+      startColor: [number, number, number, number];
+      endColor: [number, number, number, number];
+      style: "linear" | "radial" | "angle" | "reflected" | "diamond";
+      angle: number;
+      scale: number;
+      reverse: boolean;
+    }
   | { kind: "pattern" }
   | { kind: "patternScaled"; scale: number };
 

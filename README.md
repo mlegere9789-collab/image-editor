@@ -23464,6 +23464,47 @@ cases. `cargo fmt`/`clippy --all-targets -D warnings`/`test` and
 Tests: 1914 Rust (1913 → 1914), 33 frontend (unchanged — one slider, no
 dedicated frontend test suite for the options bar's plain controls).
 
+## Phase 401 — Fill Layer's Gradient Style, Angle, Scale and Reverse
+
+FILL LAYER's own "Photoshop's gradient style/angle/scale options remain a
+documented scope cut" line was the next largest-impact item in
+`docs/PLAN_TO_100.md`'s Phase D backlog — the gradient counterpart to
+Phase 396's Pattern Scale. A new sibling variant, `Fill::GradientStyled`,
+joins `Fill::Gradient` (unchanged, still the fixed top-left-to-bottom-
+right diagonal) rather than adding fields to it, the same reasoning
+`Fill::PatternScaled` already established for `Fill::Pattern`. Rather
+than reimplementing Style/Angle/Scale/Reverse a third time, this phase
+first extracted the free function `gradient_t` — the exact per-pixel `u`/
+`v`/style-match/reverse math `Document::gradient_overlay_with`'s own
+closure already computed inline — so both it and the new
+`Fill::GradientStyled` arm call the same code; `gradient_overlay_with`
+itself was re-verified byte-for-byte unchanged by rerunning its own full
+test suite (including its own Style/Angle/Scale/Reverse test) after the
+extraction, before any new code was added on top of it. `GradientStyle`
+gained `Serialize` (it only ever needed `Deserialize` before, as an
+options-struct field the frontend sends but the backend never sends
+back; `Fill` itself derives `Serialize` for `DocumentView`, so a variant
+holding a `GradientStyle` needs it too). The new variant's own box is
+always the whole canvas — a fill layer has no narrower bounds to align
+with, unlike a layer style's own opaque-bounds-or-document choice.
+
+**Verified.** All 30 pre-existing gradient-related tests (fill, overlay,
+map, tool, presets) pass unmodified, proving the `gradient_t` extraction
+changed nothing. One new hand-computed test,
+`a_gradient_styled_fill_layer_reaches_style_angle_scale_and_reverse`,
+reuses `gradient_overlay_with_styles_angle_scale_reverse_and_alignment`'s
+own known-good values on a 4×4 canvas instead of a layer's own bounds:
+Linear at angle 0 reads `t = x / 3` across the top row (`0, 85, 170,
+255`, identical to that overlay test's own case), Reverse flips it
+(`255, 170, 85, 0`), and angle 90 runs the gradient up the canvas (top
+row white, bottom row black) — plus two range-validation cases (scale 9,
+a NaN angle). `cargo fmt`/`clippy --all-targets -D warnings`/`test` and
+`npm run build`/`test`/`tsc --noEmit` all clean.
+
+Tests: 1915 Rust (1914 → 1915), 33 frontend (unchanged — a Style
+dropdown, two sliders, and a checkbox added to the existing Fill Layer
+dialog's Gradient case, no new test file needed).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

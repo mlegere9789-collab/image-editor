@@ -2156,6 +2156,12 @@ export default function App() {
   const [fillLayerKind, setFillLayerKind] =
     useState<Fill["kind"]>("solidColor");
   const [fillPatternScale, setFillPatternScale] = useState(100);
+  const [fillGradientStyle, setFillGradientStyle] = useState<
+    "linear" | "radial" | "angle" | "reflected" | "diamond"
+  >("linear");
+  const [fillGradientAngle, setFillGradientAngle] = useState(-45);
+  const [fillGradientScale, setFillGradientScale] = useState(100);
+  const [fillGradientReverse, setFillGradientReverse] = useState(false);
   // The Type tools: a text layer's type, new or edited.
   const [showTypeDialog, setShowTypeDialog] = useState(false);
   const [typeText, setTypeText] = useState("Type");
@@ -6609,15 +6615,28 @@ export default function App() {
       case "gradient": {
         const [er, eg, eb] = hexToRgb(gradientEndColor);
         return {
-          kind: "gradient",
+          kind: "gradientStyled",
           startColor: [r, g, b, 255],
           endColor: [er, eg, eb, 255],
+          style: fillGradientStyle,
+          angle: fillGradientAngle,
+          scale: fillGradientScale,
+          reverse: fillGradientReverse,
         };
       }
       default:
         return { kind: "patternScaled", scale: fillPatternScale };
     }
-  }, [fillLayerKind, brushColor, gradientEndColor, fillPatternScale]);
+  }, [
+    fillLayerKind,
+    brushColor,
+    gradientEndColor,
+    fillPatternScale,
+    fillGradientStyle,
+    fillGradientAngle,
+    fillGradientScale,
+    fillGradientReverse,
+  ]);
 
   const addFillLayer = useCallback(async () => {
     const fill = currentFill();
@@ -27539,14 +27558,75 @@ export default function App() {
               </label>
             )}
             {fillLayerKind === "gradient" && (
-              <label className="control">
-                <span className="control__label">End</span>
-                <input
-                  type="color"
-                  value={gradientEndColor}
-                  onChange={(event) => setGradientEndColor(event.target.value)}
-                />
-              </label>
+              <>
+                <label className="control">
+                  <span className="control__label">End</span>
+                  <input
+                    type="color"
+                    value={gradientEndColor}
+                    onChange={(event) =>
+                      setGradientEndColor(event.target.value)
+                    }
+                  />
+                </label>
+                <label className="control control--row">
+                  <span className="control__label">Style</span>
+                  <select
+                    value={fillGradientStyle}
+                    onChange={(event) =>
+                      setFillGradientStyle(
+                        event.target.value as typeof fillGradientStyle,
+                      )
+                    }
+                  >
+                    <option value="linear">Linear</option>
+                    <option value="radial">Radial</option>
+                    <option value="angle">Angle</option>
+                    <option value="reflected">Reflected</option>
+                    <option value="diamond">Diamond</option>
+                  </select>
+                </label>
+                <label className="control">
+                  <span className="control__label">
+                    Angle
+                    <span className="control__value">{fillGradientAngle}°</span>
+                  </span>
+                  <input
+                    type="range"
+                    min={-180}
+                    max={180}
+                    value={fillGradientAngle}
+                    onChange={(event) =>
+                      setFillGradientAngle(Number(event.target.value))
+                    }
+                  />
+                </label>
+                <label className="control">
+                  <span className="control__label">
+                    Scale
+                    <span className="control__value">{fillGradientScale}%</span>
+                  </span>
+                  <input
+                    type="range"
+                    min={10}
+                    max={150}
+                    value={fillGradientScale}
+                    onChange={(event) =>
+                      setFillGradientScale(Number(event.target.value))
+                    }
+                  />
+                </label>
+                <label className="control control--row">
+                  <input
+                    type="checkbox"
+                    checked={fillGradientReverse}
+                    onChange={(event) =>
+                      setFillGradientReverse(event.target.checked)
+                    }
+                  />
+                  <span className="control__label">Reverse</span>
+                </label>
+              </>
             )}
             {fillLayerKind === "patternScaled" && (
               <label className="control">

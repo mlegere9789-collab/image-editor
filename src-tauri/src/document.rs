@@ -422,7 +422,7 @@ pub enum StrokePosition {
 }
 
 /// Layer > Layer Style > Gradient Overlay's Style.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum GradientStyle {
     Linear,
@@ -3696,6 +3696,23 @@ pub enum Fill {
         start_color: [u8; 4],
         end_color: [u8; 4],
     },
+    /// [`Fill::Gradient`] with Photoshop's own Style, Angle, Scale and
+    /// Reverse options — the same [`GradientStyle`] and `gradient_t` math
+    /// [`Document::gradient_overlay_with`] already uses, over the whole
+    /// canvas rather than a layer's opaque bounds (a fill layer has no
+    /// bounds narrower than the canvas to align with). A new variant
+    /// rather than fields added to [`Fill::Gradient`] itself, matching
+    /// [`Fill::PatternScaled`]'s own reasoning.
+    GradientStyled {
+        start_color: [u8; 4],
+        end_color: [u8; 4],
+        style: GradientStyle,
+        /// Angle, degrees counter-clockwise from the right.
+        angle: f32,
+        /// Scale, 10-150 %.
+        scale: u32,
+        reverse: bool,
+    },
     /// The pattern Edit > Define Pattern captured, tiled from the top-left
     /// corner.
     Pattern,
@@ -5120,6 +5137,50 @@ fn box_blur_field(field: &[f32], w: usize, h: usize, r: usize) -> Vec<f32> {
 /// The gradient angle back from its sine and cosine, in degrees.
 fn o_angle(cos: f32, sin: f32) -> f32 {
     sin.atan2(cos).to_degrees()
+}
+
+/// A gradient's own `t` (0..=1, pre-color-mix) at document position
+/// `(col, row)`, for a box centred at `(cx, cy)` with half-extents
+/// `(hw, hh)`, angle trig `(sin, cos)`, and `along`/`across` (the box's
+/// own extents projected onto the angle and its perpendicular) already
+/// computed once by the caller — shared by
+/// [`Document::gradient_overlay_with`] and [`Fill::GradientStyled`]'s own
+/// `render_fill` arm, the exact math this project's five gradient Styles
+/// (Linear, Reflected, Radial, Diamond, Angle) already use.
+#[allow(clippy::too_many_arguments)]
+fn gradient_t(
+    style: GradientStyle,
+    reverse: bool,
+    cx: f32,
+    cy: f32,
+    hw: f32,
+    hh: f32,
+    along: f32,
+    across: f32,
+    scale: f32,
+    sin: f32,
+    cos: f32,
+    col: f32,
+    row: f32,
+) -> f32 {
+    let (ex, ey) = (col - cx, -(row - cy));
+    let u = (ex * cos + ey * sin) / along / scale;
+    let v = (-ex * sin + ey * cos) / across / scale;
+    let mut t = match style {
+        GradientStyle::Linear => (u + 1.0) / 2.0,
+        GradientStyle::Reflected => u.abs(),
+        GradientStyle::Radial => ((ex / hw).powi(2) + (ey / hh).powi(2)).sqrt() / scale,
+        GradientStyle::Diamond => u.abs().max(v.abs()),
+        GradientStyle::Angle => {
+            let bearing = ey.atan2(ex).to_degrees() - o_angle(cos, sin);
+            bearing.rem_euclid(360.0) / 360.0
+        }
+    }
+    .clamp(0.0, 1.0);
+    if reverse {
+        t = 1.0 - t;
+    }
+    t
 }
 
 fn bevel_height_at(
@@ -10187,6 +10248,51 @@ impl Document {
                             } else {
                                 0.0
                             };
+                            pixels[base + channel] = to_byte(out);
+                        }
+                        pixels[base + 3] = to_byte(source_alpha);
+                    }
+                }
+            }
+            Fill::GradientStyled {
+                start_color,
+                end_color,
+                style,
+                angle,
+                scale,
+                reverse,
+            } => {
+                if !(10..=150).contains(&scale) {
+                    return Err("Gradient Fill scale must be between 10 and 150.".to_string());
+                }
+                if !angle.is_finite() {
+                    return Err("Gradient Fill angle must be a number.".to_string());
+                }
+                let (x0, y0, x1, y1) = (0.0, 0.0, self.width as f32, self.height as f32);
+                let (cx, cy) = ((x0 + x1 - 1.0) / 2.0, (y0 + y1 - 1.0) / 2.0);
+                let (hw, hh) = (
+                    ((x1 - x0 - 1.0) / 2.0).max(0.5),
+                    ((y1 - y0 - 1.0) / 2.0).max(0.5),
+                );
+                let (sin, cos) = angle.to_radians().sin_cos();
+                let scale_frac = scale as f32 / 100.0;
+                let along = (hw * cos).abs() + (hh * sin).abs();
+                let across = (hw * sin).abs() + (hh * cos).abs();
+                for py in 0..self.height {
+                    for px in 0..self.width {
+                        let t = gradient_t(
+                            style, reverse, cx, cy, hw, hh, along, across, scale_frac, sin, cos,
+                            px as f32, py as f32,
+                        );
+                        let base = (py as usize * self.width as usize + px as usize) * CHANNELS;
+                        let source_alpha = lerp(to_unit(start_color[3]), to_unit(end_color[3]), t);
+                        for channel in 0..3 {
+                            let cs = lerp(
+                                to_unit(start_color[channel]),
+                                to_unit(end_color[channel]),
+                                t,
+                            );
+                            let out = if source_alpha > 0.0 { cs } else { 0.0 };
                             pixels[base + channel] = to_byte(out);
                         }
                         pixels[base + 3] = to_byte(source_alpha);
@@ -24225,23 +24331,10 @@ impl Document {
             if a == 0 {
                 return [src[base], src[base + 1], src[base + 2], a];
             }
-            let (ex, ey) = (col as f32 - cx, -(row as f32 - cy));
-            let u = (ex * cos + ey * sin) / along / scale;
-            let v = (-ex * sin + ey * cos) / across / scale;
-            let mut t = match style {
-                GradientStyle::Linear => (u + 1.0) / 2.0,
-                GradientStyle::Reflected => u.abs(),
-                GradientStyle::Radial => ((ex / hw).powi(2) + (ey / hh).powi(2)).sqrt() / scale,
-                GradientStyle::Diamond => u.abs().max(v.abs()),
-                GradientStyle::Angle => {
-                    let bearing = ey.atan2(ex).to_degrees() - o_angle(cos, sin);
-                    bearing.rem_euclid(360.0) / 360.0
-                }
-            }
-            .clamp(0.0, 1.0);
-            if reverse {
-                t = 1.0 - t;
-            }
+            let t = gradient_t(
+                style, reverse, cx, cy, hw, hh, along, across, scale, sin, cos, col as f32,
+                row as f32,
+            );
             let mut out = [0u8; CHANNELS];
             for c in 0..3 {
                 let target = color1[c] as f32 + (color2[c] as f32 - color1[c] as f32) * t;
@@ -42695,6 +42788,56 @@ mod tests {
         assert_eq!(pixel(&doc, live, 1, 1), [140, 0, 115, 169]);
         assert!(doc.view().layers[0].fill.is_none());
         assert!(doc.set_fill(baked, Fill::Pattern).is_err());
+    }
+
+    #[test]
+    fn a_gradient_styled_fill_layer_reaches_style_angle_scale_and_reverse() {
+        // Same geometry and expected values as gradient_overlay_with's own
+        // Linear/angle-0 and angle-90 cases
+        // (gradient_overlay_with_styles_angle_scale_reverse_and_alignment),
+        // applied to the whole 4x4 canvas instead of a layer's own opaque
+        // bounds -- a fill layer has no narrower bounds to align with.
+        // t = x / 3 at row 0: 0, 85, 170, 255.
+        let mut doc = Document::new(4, 4).unwrap();
+        let styled = |style, angle, scale, reverse| Fill::GradientStyled {
+            start_color: [0, 0, 0, 255],
+            end_color: [255, 255, 255, 255],
+            style,
+            angle,
+            scale,
+            reverse,
+        };
+        let id = doc
+            .add_fill_layer("g", styled(GradientStyle::Linear, 0.0, 100, false))
+            .unwrap();
+        assert_eq!(
+            (0..4).map(|x| pixel(&doc, id, x, 0)[0]).collect::<Vec<_>>(),
+            vec![0, 85, 170, 255]
+        );
+        // Reverse reads 1 - t.
+        let id2 = doc
+            .add_fill_layer("g2", styled(GradientStyle::Linear, 0.0, 100, true))
+            .unwrap();
+        assert_eq!(
+            (0..4)
+                .map(|x| pixel(&doc, id2, x, 0)[0])
+                .collect::<Vec<_>>(),
+            vec![255, 170, 85, 0]
+        );
+        // Angle 90 runs up the canvas: the top row is white, the bottom
+        // black.
+        let id3 = doc
+            .add_fill_layer("g3", styled(GradientStyle::Linear, 90.0, 100, false))
+            .unwrap();
+        assert_eq!(pixel(&doc, id3, 0, 0)[0], 255);
+        assert_eq!(pixel(&doc, id3, 3, 0)[0], 255);
+        assert_eq!(pixel(&doc, id3, 0, 3)[0], 0);
+        assert!(doc
+            .add_fill_layer("bad", styled(GradientStyle::Linear, 0.0, 9, false))
+            .is_err());
+        assert!(doc
+            .add_fill_layer("bad2", styled(GradientStyle::Linear, f32::NAN, 100, false))
+            .is_err());
     }
 
     #[test]
