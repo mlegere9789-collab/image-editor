@@ -2064,6 +2064,7 @@ export default function App() {
   const [satinColor, setSatinColor] = useState("#000000");
   const [satinOpacity, setSatinOpacity] = useState(50);
   const [satinInvert, setSatinInvert] = useState(true);
+  const [satinBlendMode, setSatinBlendMode] = useState<BlendMode>("normal");
   const [showPatternOverlayDialog, setShowPatternOverlayDialog] =
     useState(false);
   const [patternOverlayScale, setPatternOverlayScale] = useState(10);
@@ -6334,6 +6335,7 @@ export default function App() {
       color: [r, g, b],
       opacity: satinOpacity,
       invert: satinInvert,
+      blendMode: satinBlendMode,
     });
     setShowSatinDialog(false);
   }, [
@@ -6345,6 +6347,7 @@ export default function App() {
     satinColor,
     satinOpacity,
     satinInvert,
+    satinBlendMode,
   ]);
 
   const applyInnerShadow = useCallback(async () => {
@@ -26021,6 +26024,21 @@ export default function App() {
                   setSatinOpacity(Number(event.target.value))
                 }
               />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Blend Mode</span>
+              <select
+                value={satinBlendMode}
+                onChange={(event) =>
+                  setSatinBlendMode(event.target.value as BlendMode)
+                }
+              >
+                {blendModes.map((info) => (
+                  <option key={info.mode} value={info.mode}>
+                    {info.label}
+                  </option>
+                ))}
+              </select>
             </label>
             <label className="control control--row">
               <input

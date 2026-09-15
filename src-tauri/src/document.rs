@@ -23595,8 +23595,9 @@ impl Document {
     /// every already-opaque pixel's RGB toward `color`; `invert` flips the
     /// figure so the agreeing interior is shaded instead. Alpha is
     /// untouched and transparent pixels are left alone, as in
-    /// [`Self::inner_shadow`]. Photoshop's Multiply default and its
-    /// contour and anti-alias options are documented scope cuts.
+    /// [`Self::inner_shadow`]. Contour and anti-alias remain documented
+    /// scope cuts; the Multiply default and every other blend mode are
+    /// reachable through [`Self::satin_with`].
     #[allow(clippy::too_many_arguments)]
     pub fn satin(
         &mut self,
@@ -23607,6 +23608,39 @@ impl Document {
         color: [u8; 3],
         opacity: u32,
         invert: bool,
+    ) -> Result<Option<Rect>, String> {
+        self.satin_with(
+            id,
+            distance,
+            angle,
+            size,
+            color,
+            opacity,
+            invert,
+            BlendMode::Normal,
+        )
+    }
+
+    /// [`Self::satin`] with a choice of [`BlendMode`] — including
+    /// Photoshop's own Multiply default, which `satin` itself never
+    /// reaches. The satin figure's own colour runs through
+    /// `blend_mode.blend(Cb, Cs)` against each already-opaque pixel
+    /// before Opacity mixes toward that result, the same narrowing
+    /// [`Self::color_overlay_with`], [`Self::gradient_overlay_with`], and
+    /// [`Self::pattern_overlay_with`] already make for their own layer
+    /// styles. `BlendMode::Normal` collapses this back to `satin`'s exact
+    /// original formula.
+    #[allow(clippy::too_many_arguments)]
+    pub fn satin_with(
+        &mut self,
+        id: LayerId,
+        distance: u32,
+        angle: f32,
+        size: u32,
+        color: [u8; 3],
+        opacity: u32,
+        invert: bool,
+        blend_mode: BlendMode,
     ) -> Result<Option<Rect>, String> {
         if distance > 250 {
             return Err("Satin distance must be between 0 and 250.".to_string());
@@ -23659,10 +23693,9 @@ impl Document {
             let frac = satin_alpha as f32 / 255.0;
             let mut out = own;
             for c in 0..3 {
-                let v = own[c] as f32;
-                out[c] = (v * (1.0 - frac) + color[c] as f32 * frac)
-                    .round()
-                    .clamp(0.0, 255.0) as u8;
+                let cb = to_unit(own[c]);
+                let blended = blend_mode.blend(cb, to_unit(color[c]));
+                out[c] = to_byte(cb * (1.0 - frac) + blended * frac);
             }
             out
         })
@@ -57232,6 +57265,41 @@ colorspaces:
         assert_eq!(pixel(&doc, id, 1, 0), [100, 150, 200, 255]);
         doc.set_locked(id, true).unwrap();
         assert!(doc.satin(id, 1, 0.0, 0, [0, 0, 0], 100, false).is_err());
+    }
+
+    #[test]
+    fn satin_with_normal_is_exactly_satin() {
+        let (mut doc, id) = satin_row();
+        doc.satin_with(id, 1, 0.0, 1, [40, 90, 10], 60, false, BlendMode::Normal)
+            .unwrap();
+        let (mut expected, id2) = satin_row();
+        expected
+            .satin(id2, 1, 0.0, 1, [40, 90, 10], 60, false)
+            .unwrap();
+        assert_eq!(doc.layers()[0].pixels, expected.layers()[0].pixels);
+    }
+
+    #[test]
+    fn satin_with_multiply_blends_the_satin_colour_first() {
+        // Same fixture and geometry as satin_opacity_scales_the_blend's own
+        // full-opacity case (own = [100, 150, 200] at x = 1, satin_alpha =
+        // 255 there so frac = 1.0), but through Multiply against red (255,
+        // 0, 0) instead of Normal against white. Multiply's own
+        // B(Cb, Cs) = Cb * Cs: red's own Cs = 255/255 = 1.0, so R is left
+        // exactly as it started (100) instead of Normal's own full-opacity
+        // behaviour, which replaces it outright
+        // (satin_opacity_scales_the_blend, above, replaces every channel
+        // with the colour at opacity 100) -- a real, contrasting result.
+        // G and B's own Cs = 0, so Cb * 0 = 0 regardless of the original
+        // value: both collapse to 0, same as Normal's full-opacity case
+        // would give for those two channels (0 either way, for different
+        // reasons). x = 2 sees satin_alpha = 0 (frac = 0), so it is
+        // untouched by either blend mode.
+        let (mut doc, id) = satin_row();
+        doc.satin_with(id, 1, 0.0, 0, [255, 0, 0], 100, false, BlendMode::Multiply)
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 1, 0), [100, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 2, 0), [100, 150, 200, 255]);
     }
 
     fn cas(width_percent: f32, height_percent: f32, amount: u8) -> ContentAwareScale {

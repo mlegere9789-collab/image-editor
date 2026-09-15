@@ -23147,6 +23147,47 @@ build`/`test` all clean.
 Tests: 1905 Rust (1904 → 1905), 33 frontend (unchanged — one dropdown,
 same pattern as Phases 391 and 392's).
 
+## Phase 394 — Satin's Blend Mode
+
+The fourth and last of the layer-style effects to gain the Blend Mode
+narrowing Phases 391-393 introduced, closing out the group.
+`Document::satin` (unchanged, still Normal-only) delegates to the new
+`satin_with(..., blend_mode: BlendMode)`, the same plain-function-plus-
+`_with`-sibling shape Phase 391's Color Overlay used (Satin had no options
+struct to extend the way Phase 392's Gradient Overlay did). Satin's own
+per-pixel shading — mixing each already-opaque pixel's RGB toward the
+satin colour by the figure (the two offset-silhouette copies' absolute
+difference) times Opacity — now runs the colour through
+`blend_mode.blend(Cb, Cs)` first, exactly the same shape Color Overlay,
+Gradient Overlay, and Pattern Overlay already use. `satin`'s Tauri command
+widened to take `blendMode` directly; the dialog gained a Blend Mode
+dropdown between Opacity and the Invert checkbox.
+
+**Verified.** `satin_with_normal_is_exactly_satin` runs the same fixture
+through `satin_with(..., BlendMode::Normal)` and `satin` side by side and
+asserts byte-identical output — plus all 5 pre-existing Satin tests
+(unmodified) still pass, proving zero behaviour change for the plain
+function. One new hand-computed test,
+`satin_with_multiply_blends_the_satin_colour_first`, reuses
+`satin_opacity_scales_the_blend`'s own fixture and geometry (own =
+`[100, 150, 200]` at x = 1, full-opacity satin figure there) against red
+`(255, 0, 0)` through Multiply instead of white through Normal: Multiply's
+`B(Cb, Cs) = Cb · Cs` leaves R exactly as it started (100, since red's own
+`Cs = 255/255 = 1.0`) while G and B both collapse to 0 (their own
+`Cs = 0`) — a real, contrasting result against that same fixture's own
+Normal full-opacity case, which replaces every channel with the colour
+outright. `cargo fmt`/`clippy --all-targets -D warnings`/`test` and
+`npm run build`/`test`/`tsc --noEmit` all clean.
+
+Tests: 1907 Rust (1905 → 1907), 33 frontend (unchanged — one dropdown,
+same pattern as Phases 391-393's).
+
+This closes out the Blend Mode narrowing across every layer style that had
+it as a documented "Normal only" scope cut: Color Overlay, Gradient
+Overlay, Pattern Overlay, and now Satin all reach every blend mode through
+their own `_with` sibling, with the plain function kept exactly as-is for
+callers that only ever wanted Normal.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

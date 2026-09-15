@@ -6704,9 +6704,12 @@ fn satin(
     color: [u8; 3],
     opacity: u32,
     invert: bool,
+    blend_mode: BlendMode,
 ) -> Result<Snapshot, String> {
     edit_checkpointed(&state, |document| {
-        document.satin(id, distance, angle, size, color, opacity, invert)
+        document.satin_with(
+            id, distance, angle, size, color, opacity, invert, blend_mode,
+        )
     })
 }
 
