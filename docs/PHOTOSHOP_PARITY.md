@@ -150,7 +150,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 
 - [x] SOLID COLOR
 - [x] GRADIENT
-- [x] PATTERN (`add_pattern_layer_with`, a new top pixel layer tiled from the top-left corner with the pattern `define_pattern` captured, its tile resized by Scale (10-400%, `add_pattern_layer` itself unchanged at 100%) before tiling; errors when no pattern is defined. Like the other fill layers it is an ordinary editable pixel layer rather than a live re-openable fill — see README Phases 144 and 398; Angle and link-with-layer remain documented scope cuts, Pattern's own tiling having no rotation concept and "layer" here already meaning the whole canvas)
+- [x] PATTERN (`add_pattern_layer_with`, a new top pixel layer tiled from the top-left corner with the pattern `define_pattern` captured, its tile resized by Scale (10-400%, `add_pattern_layer` itself unchanged at 100%/0°) then the whole tiled plane rotated by Angle about the canvas origin before tiling; errors when no pattern is defined. Like the other fill layers it is an ordinary editable pixel layer rather than a live re-openable fill — see README Phases 144, 398 and 411; link-with-layer remains a documented scope cut, "layer" here already meaning the whole canvas)
 
 ## PART XXX — NON-OBVIOUS THINGS PHOTOSHOP CAN DO
 

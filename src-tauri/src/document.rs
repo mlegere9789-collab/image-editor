@@ -3841,12 +3841,14 @@ pub enum Fill {
     /// The pattern Edit > Define Pattern captured, tiled from the top-left
     /// corner.
     Pattern,
-    /// [`Fill::Pattern`] with Photoshop's own Scale option: the pattern
-    /// tile resized by `scale` percent (nearest-neighbour) before tiling
-    /// from the top-left corner. A new variant rather than a field added
-    /// to [`Fill::Pattern`] itself, since that unit variant is already
-    /// matched bare at several call sites this project's own tests use.
-    PatternScaled { scale: u32 },
+    /// [`Fill::Pattern`] with Photoshop's own Scale and Angle options: the
+    /// pattern tile resized by `scale` percent (nearest-neighbour) then
+    /// the whole tiled plane rotated `angle` degrees counter-clockwise
+    /// about the canvas origin before tiling from the top-left corner. A
+    /// new variant rather than a field added to [`Fill::Pattern`] itself,
+    /// since that unit variant is already matched bare at several call
+    /// sites this project's own tests use.
+    PatternScaled { scale: u32, angle: f32 },
 }
 
 /// One pixel's RGB through `adjustment` — byte for byte the formula the
@@ -7266,33 +7268,51 @@ impl Document {
     /// `(x mod width, y mod height)`, alpha included. Like
     /// [`Self::add_solid_color_layer`] and [`Self::add_gradient_layer`] it
     /// is an ordinary, editable pixel layer rather than a live fill;
-    /// Photoshop's own Scale, Angle, and Link-with-Layer options are a
-    /// documented scope cut. Errors when no pattern has been defined.
+    /// Photoshop's own Link-with-Layer option is a documented scope cut
+    /// — Pattern's own tiling has no rotation concept, and "layer" here
+    /// already means the whole canvas. Errors when no pattern has been
+    /// defined.
     pub fn add_pattern_layer(&mut self, name: impl Into<String>) -> Result<LayerId, String> {
-        self.add_pattern_layer_with(name, 100)
+        self.add_pattern_layer_with(name, 100, 0.0)
     }
 
-    /// [`Self::add_pattern_layer`] with Photoshop's own Scale option: the
-    /// pattern tile resized by `scale` percent before tiling, the same
+    /// [`Self::add_pattern_layer`] with Photoshop's own Scale and Angle
+    /// options: the pattern tile resized by `scale` percent then the
+    /// whole tiled plane rotated `angle` degrees before tiling, the same
     /// [`Self::tiled_pattern_pixels`] helper [`Fill::PatternScaled`]'s own
-    /// `render_fill` arm uses. At `scale: 100` this is pixel-identical to
-    /// [`Self::add_pattern_layer`]. See README Phases 144 and 398.
+    /// `render_fill` arm uses. At `scale: 100, angle: 0.0` this is
+    /// pixel-identical to [`Self::add_pattern_layer`]. See README Phases
+    /// 144, 398 and 411.
     pub fn add_pattern_layer_with(
         &mut self,
         name: impl Into<String>,
         scale: u32,
+        angle: f32,
     ) -> Result<LayerId, String> {
-        let pixels = self.tiled_pattern_pixels(scale)?;
+        let pixels = self.tiled_pattern_pixels(scale, angle)?;
         self.add_layer(name, &pixels, self.width, self.height)
     }
 
     /// The defined pattern tiled across the whole canvas, its tile
-    /// resized by `scale` percent (nearest-neighbour, `10..=400`) before
-    /// tiling from the top-left corner. Shared by [`Self::add_pattern_layer_with`]
+    /// resized by `scale` percent (nearest-neighbour, `10..=400`) and the
+    /// tiled plane rotated `angle` degrees counter-clockwise about the
+    /// canvas origin — each destination pixel's own coordinate rotated by
+    /// `-angle` (the standard sample-space inverse rotation
+    /// [`Document::gradient_overlay_with`]'s own angle math also uses)
+    /// before the same modulo-the-tile lookup, `rem_euclid` rather than
+    /// `%` since a rotated coordinate can land negative even for a
+    /// nonnegative pixel (the same reason [`Stroke::PatternStamp`]'s own
+    /// unaligned phase offset needs it). `angle: 0.0` is bit-identical to
+    /// the pre-rotation `%` lookup: `sin`/`cos` of exactly `0.0` are
+    /// exactly `0.0`/`1.0`, so the rotated coordinate is the original
+    /// coordinate unchanged. Shared by [`Self::add_pattern_layer_with`]
     /// and [`Fill::PatternScaled`]'s own `render_fill` arm.
-    fn tiled_pattern_pixels(&self, scale: u32) -> Result<Vec<u8>, String> {
+    fn tiled_pattern_pixels(&self, scale: u32, angle: f32) -> Result<Vec<u8>, String> {
         if !(10..=400).contains(&scale) {
             return Err("Pattern scale must be between 10 and 400.".to_string());
+        }
+        if !angle.is_finite() {
+            return Err("Pattern angle must be a number.".to_string());
         }
         let pattern = self.pattern.as_ref().ok_or_else(|| {
             "No pattern has been defined yet (Edit > Define Pattern).".to_string()
@@ -7301,11 +7321,17 @@ impl Document {
         let factor = scale as f32 / 100.0;
         let tile_w = ((pw as f32 * factor).round() as usize).max(1);
         let tile_h = ((ph as f32 * factor).round() as usize).max(1);
+        let (sin, cos) = angle.to_radians().sin_cos();
         let mut pixels = Vec::with_capacity(self.buffer_len());
         for y in 0..self.height as usize {
             for x in 0..self.width as usize {
-                let src_x = (((x % tile_w) as f32 / factor) as usize).min(pw - 1);
-                let src_y = (((y % tile_h) as f32 / factor) as usize).min(ph - 1);
+                let (fx, fy) = (x as f32, y as f32);
+                let rx = fx * cos + fy * sin;
+                let ry = fy * cos - fx * sin;
+                let tx = rx.rem_euclid(tile_w as f32);
+                let ty = ry.rem_euclid(tile_h as f32);
+                let src_x = ((tx / factor) as usize).min(pw - 1);
+                let src_y = ((ty / factor) as usize).min(ph - 1);
                 let src = (src_y * pw + src_x) * CHANNELS;
                 pixels.extend_from_slice(&pattern.pixels[src..src + CHANNELS]);
             }
@@ -10468,8 +10494,8 @@ impl Document {
                     }
                 }
             }
-            Fill::PatternScaled { scale } => {
-                pixels = self.tiled_pattern_pixels(scale)?;
+            Fill::PatternScaled { scale, angle } => {
+                pixels = self.tiled_pattern_pixels(scale, angle)?;
             }
         }
         Ok(pixels)
@@ -43278,7 +43304,13 @@ mod tests {
         doc.deselect();
         let plain = doc.add_fill_layer("plain", Fill::Pattern).unwrap();
         let scaled = doc
-            .add_fill_layer("scaled", Fill::PatternScaled { scale: 100 })
+            .add_fill_layer(
+                "scaled",
+                Fill::PatternScaled {
+                    scale: 100,
+                    angle: 0.0,
+                },
+            )
             .unwrap();
         assert_eq!(pixel(&doc, plain, 0, 0), pixel(&doc, scaled, 0, 0));
         assert_eq!(pixel(&doc, plain, 0, 0)[0], 1);
@@ -43307,7 +43339,13 @@ mod tests {
         doc.define_pattern(base).unwrap();
         doc.deselect();
         let id = doc
-            .add_fill_layer("p", Fill::PatternScaled { scale: 200 })
+            .add_fill_layer(
+                "p",
+                Fill::PatternScaled {
+                    scale: 200,
+                    angle: 0.0,
+                },
+            )
             .unwrap();
         for y in 0..2 {
             assert_eq!(pixel(&doc, id, 0, y)[0], 1);
@@ -43316,10 +43354,22 @@ mod tests {
             assert_eq!(pixel(&doc, id, 3, y)[0], 2);
         }
         assert!(doc
-            .add_fill_layer("bad", Fill::PatternScaled { scale: 9 })
+            .add_fill_layer(
+                "bad",
+                Fill::PatternScaled {
+                    scale: 9,
+                    angle: 0.0
+                }
+            )
             .is_err());
         assert!(doc
-            .add_fill_layer("bad2", Fill::PatternScaled { scale: 401 })
+            .add_fill_layer(
+                "bad2",
+                Fill::PatternScaled {
+                    scale: 401,
+                    angle: 0.0
+                }
+            )
             .is_err());
     }
 
@@ -55347,7 +55397,9 @@ mod tests {
         doc.select_rectangle(1.0, 0.0, 3.0, 2.0).unwrap();
         doc.define_pattern(id).unwrap();
         doc.deselect();
-        let fill = doc.add_pattern_layer_with("Pattern Fill 1", 200).unwrap();
+        let fill = doc
+            .add_pattern_layer_with("Pattern Fill 1", 200, 0.0)
+            .unwrap();
         let p = &doc.layers()[1].pixels;
         assert_eq!(doc.layers()[1].id, fill);
         let idx = |x: usize, y: usize| (y * 3 + x) * 4;
@@ -55364,13 +55416,47 @@ mod tests {
         doc2.define_pattern(id2).unwrap();
         doc2.deselect();
         let plain = doc2.add_pattern_layer("plain").unwrap();
-        let scaled = doc2.add_pattern_layer_with("scaled", 100).unwrap();
+        let scaled = doc2.add_pattern_layer_with("scaled", 100, 0.0).unwrap();
         assert_eq!(
             doc2.layer(plain).unwrap().pixels,
             doc2.layer(scaled).unwrap().pixels
         );
-        assert!(doc.add_pattern_layer_with("bad", 9).is_err());
-        assert!(doc.add_pattern_layer_with("bad2", 401).is_err());
+        assert!(doc.add_pattern_layer_with("bad", 9, 0.0).is_err());
+        assert!(doc.add_pattern_layer_with("bad2", 401, 0.0).is_err());
+    }
+
+    #[test]
+    fn add_pattern_layer_with_angle_rotates_the_tiled_plane() {
+        // A 4x4 pattern, R channel = row*4 + col + 1 (values 1..=16), on
+        // an 8x8 canvas at Angle 30 degrees. The canvas origin (0, 0)
+        // samples the pattern's own origin at *any* angle -- rotating a
+        // point already at the pivot leaves it at the pivot. Three other
+        // points cross-checked against an independent Python script
+        // emulating f32 arithmetic via struct.pack/unpack round-tripping,
+        // reproducing tiled_pattern_pixels's own rx/ry rotation and
+        // rem_euclid tiling exactly (sin(30 degrees) is exactly 0.5 in
+        // f32; cos(30 degrees) is 0.8660254): (3, 5) -> tile (1, 2) -> 10;
+        // (6, 2) -> tile (2, 2) -> 11; (7, 7) -> tile (1, 2) -> 10.
+        let mut doc = Document::new(4, 4).unwrap();
+        #[rustfmt::skip]
+        let pixels: Vec<u8> = (0..4).flat_map(|row: u8| (0..4).flat_map(move |col: u8| {
+            [row * 4 + col + 1, 0, 0, 255]
+        })).collect();
+        let id = doc.add_layer("tile", &pixels, 4, 4).unwrap();
+        doc.select_rectangle(0.0, 0.0, 4.0, 4.0).unwrap();
+        doc.define_pattern(id).unwrap();
+        doc.deselect();
+        doc.resize_canvas(8, 8, ReferencePoint::TopLeft).unwrap();
+        let fill = doc.add_pattern_layer_with("angled", 100, 30.0).unwrap();
+        let p = &doc.layer(fill).unwrap().pixels;
+        let at = |x: usize, y: usize| p[(y * 8 + x) * 4];
+        assert_eq!(at(0, 0), 1);
+        assert_eq!(at(3, 5), 10);
+        assert_eq!(at(6, 2), 11);
+        assert_eq!(at(7, 7), 10);
+        assert!(doc
+            .add_pattern_layer_with("bad_angle", 100, f32::NAN)
+            .is_err());
     }
 
     #[test]

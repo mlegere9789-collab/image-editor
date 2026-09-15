@@ -199,7 +199,7 @@ export type Fill =
       reverse: boolean;
     }
   | { kind: "pattern" }
-  | { kind: "patternScaled"; scale: number };
+  | { kind: "patternScaled"; scale: number; angle: number };
 
 /** Mirrors `Adjustment` in src-tauri/src/document.rs (serde internally
  * tagged by `kind`). */

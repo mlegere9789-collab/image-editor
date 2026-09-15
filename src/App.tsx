@@ -1792,6 +1792,7 @@ export default function App() {
   const strokeSeed = useRef(1);
   const [tipSpacing, setTipSpacing] = useState(4);
   const [patternFillScale, setPatternFillScale] = useState(100);
+  const [patternFillAngle, setPatternFillAngle] = useState(0);
   // Gradient / Pattern / Adjustment Presets: the dialog and a name field.
   const [showPresetsDialog, setShowPresetsDialog] = useState(false);
   const [presetName, setPresetName] = useState("");
@@ -2179,6 +2180,7 @@ export default function App() {
   const [fillLayerKind, setFillLayerKind] =
     useState<Fill["kind"]>("solidColor");
   const [fillPatternScale, setFillPatternScale] = useState(100);
+  const [fillPatternAngle, setFillPatternAngle] = useState(0);
   const [fillGradientStyle, setFillGradientStyle] = useState<
     "linear" | "radial" | "angle" | "reflected" | "diamond"
   >("linear");
@@ -6669,13 +6671,18 @@ export default function App() {
         };
       }
       default:
-        return { kind: "patternScaled", scale: fillPatternScale };
+        return {
+          kind: "patternScaled",
+          scale: fillPatternScale,
+          angle: fillPatternAngle,
+        };
     }
   }, [
     fillLayerKind,
     brushColor,
     gradientEndColor,
     fillPatternScale,
+    fillPatternAngle,
     fillGradientStyle,
     fillGradientAngle,
     fillGradientScale,
@@ -12252,10 +12259,13 @@ export default function App() {
         <button
           className="button button--quiet"
           onClick={() =>
-            void runCommand("add_pattern_layer", { scale: patternFillScale })
+            void runCommand("add_pattern_layer", {
+              scale: patternFillScale,
+              angle: patternFillAngle,
+            })
           }
           disabled={busy || !hasDocument || !(document?.hasPattern ?? false)}
-          title="Layer > New Fill Layer > Pattern (tiles the pattern captured by Define Pattern, resized by Scale)"
+          title="Layer > New Fill Layer > Pattern (tiles the pattern captured by Define Pattern, resized by Scale and rotated by Angle)"
         >
           Pattern Fill
         </button>
@@ -12271,6 +12281,21 @@ export default function App() {
             value={patternFillScale}
             onChange={(event) =>
               setPatternFillScale(Number(event.target.value))
+            }
+          />
+        </label>
+        <label
+          className="tools__slider"
+          title="Pattern Fill's own Angle: rotates the tiled plane before it repeats"
+        >
+          Angle {patternFillAngle}°
+          <input
+            type="range"
+            min={-180}
+            max={180}
+            value={patternFillAngle}
+            onChange={(event) =>
+              setPatternFillAngle(Number(event.target.value))
             }
           />
         </label>
@@ -27861,6 +27886,23 @@ export default function App() {
                   value={fillPatternScale}
                   onChange={(event) =>
                     setFillPatternScale(Number(event.target.value))
+                  }
+                />
+              </label>
+            )}
+            {fillLayerKind === "patternScaled" && (
+              <label className="control">
+                <span className="control__label">
+                  Angle
+                  <span className="control__value">{fillPatternAngle}°</span>
+                </span>
+                <input
+                  type="range"
+                  min={-180}
+                  max={180}
+                  value={fillPatternAngle}
+                  onChange={(event) =>
+                    setFillPatternAngle(Number(event.target.value))
                   }
                 />
               </label>

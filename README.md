@@ -23975,6 +23975,56 @@ Tests: 1925 Rust (1923 → 1925), 36 frontend (unchanged — a dropdown
 reusing the existing Selective Color dialog's own shape needs no new
 test file).
 
+## Phase 411 — Pattern Fill Layer's Angle
+
+PATTERN's own "Angle and link-with-layer remain documented scope cuts,
+Pattern's own tiling having no rotation concept" line was next in
+`docs/PLAN_TO_100.md`'s Phase D backlog. That line was itself slightly
+stale by the time this phase started — nothing about the existing
+`x mod tile_w`/`y mod tile_h` tiling *structurally* prevents a rotation,
+it just never had one — so this phase adds exactly that and narrows the
+row to only Link-with-Layer (Pattern's own tiling has no independent
+per-layer content to link against; "layer" here already means the whole
+canvas, same reasoning the row already gave).
+
+`Fill::PatternScaled` (and `tiled_pattern_pixels`/`add_pattern_layer_with`,
+its two backing functions) widened in place with an `angle: f32` field —
+each already-struct-shaped, already having grown once for Scale, so a
+second field costs every real call site (5 in `document.rs`, 1 in
+`lib.rs`) one more line rather than a new sibling. The rotation is the
+same sample-space inverse-rotation [`gradient_overlay_with`]'s own angle
+math already uses — `rx = x·cos θ + y·sin θ`, `ry = y·cos θ − x·sin θ`
+for destination pixel `(x, y)` — but with `rem_euclid` standing in for
+the old `%`, since a rotated coordinate can land negative even for a
+nonnegative pixel (the exact reason `Stroke::PatternStamp`'s own
+unaligned phase offset already needs it). At `angle: 0.0`, `sin`/`cos`
+are exactly `0.0`/`1.0` in `f32`, so `rx`/`ry` reduce to the original
+`x`/`y` unchanged and every pre-existing test's output is bit-identical
+by construction — no separate before/after comparison needed the way
+some phases require, since the old formula is a literal special case of
+the new one. `add_pattern_layer`'s Tauri command gained an optional
+`angle` (defaulting to `0.0`); the frontend gained an Angle slider next
+to Scale in both places Pattern Fill can be started — the toolbar's own
+quick Pattern Fill button and the Fill Layer dialog's Pattern option.
+
+**Verified.** All 7 pre-existing pattern-layer/fill tests pass
+unmodified. One new hand-computed test,
+`add_pattern_layer_with_angle_rotates_the_tiled_plane`: a 4×4 pattern (R
+channel `row·4 + col + 1`, values 1..=16) tiled onto an 8×8 canvas at
+Angle 30° — the canvas origin `(0, 0)` samples the pattern's own origin
+at *any* angle (rotating a point already at the pivot leaves it there),
+and three further points cross-checked against an independent Python
+script emulating `f32` arithmetic via `struct.pack`/`unpack`
+round-tripping, reproducing `tiled_pattern_pixels`'s own `rx`/`ry`
+rotation and `rem_euclid` tiling exactly (`sin(30°)` is exactly `0.5` in
+`f32`; `cos(30°)` is `0.8660254`): `(3, 5) → tile (1, 2) → 10`,
+`(6, 2) → tile (2, 2) → 11`, `(7, 7) → tile (1, 2) → 10`; a non-finite
+angle errors. `cargo fmt`/`clippy --all-targets -D warnings`/`test` and
+`npm run build`/`test`/`tsc --noEmit` all clean.
+
+Tests: 1926 Rust (1925 → 1926), 36 frontend (unchanged — two sliders
+reusing existing controls' own shape need no new test file).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
