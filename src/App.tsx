@@ -2683,6 +2683,7 @@ export default function App() {
   const [conteInvert, setConteInvert] = useState(false);
   const [conteForegroundColor, setConteForegroundColor] = useState("#000000");
   const [conteBackgroundColor, setConteBackgroundColor] = useState("#ffffff");
+  const [conteTexture, setConteTexture] = useState("canvas");
   const [chalkAndCharcoalCharcoalArea, setChalkAndCharcoalCharcoalArea] =
     useState(10);
   const [chalkAndCharcoalChalkArea, setChalkAndCharcoalChalkArea] = useState(5);
@@ -8375,6 +8376,7 @@ export default function App() {
       invert: conteInvert,
       foregroundColor: hexToRgb(conteForegroundColor),
       backgroundColor: hexToRgb(conteBackgroundColor),
+      texture: conteTexture,
     });
     setShowConteDialog(false);
   }, [
@@ -8388,6 +8390,7 @@ export default function App() {
     conteInvert,
     conteForegroundColor,
     conteBackgroundColor,
+    conteTexture,
   ]);
 
   const applyPlaster = useCallback(async () => {
@@ -33108,6 +33111,18 @@ export default function App() {
                 />
               </label>
             ))}
+            <label className="control control--row">
+              <span className="control__label">Texture</span>
+              <select
+                value={conteTexture}
+                onChange={(event) => setConteTexture(event.target.value)}
+              >
+                <option value="canvas">Canvas</option>
+                <option value="brick">Brick</option>
+                <option value="burlap">Burlap</option>
+                <option value="sandstone">Sandstone</option>
+              </select>
+            </label>
             <label className="control control--row">
               <span className="control__label">Light</span>
               <select

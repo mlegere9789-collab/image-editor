@@ -24889,6 +24889,46 @@ clean.
 Tests: 1961 Rust (1958 → 1961: three new tests), 39 frontend
 (unchanged).
 
+## Phase 426 — Conté Crayon's Choice of Texture
+
+Conté Crayon's own row still named "Photoshop's four named textures"
+as a scope cut even after Phase 425 gave it real foreground/background
+colouring — but checking the actual code against the same pattern
+that has caught several stale rows this project (Mixer Brush's Sample
+All Layers in Phase 420, Move Tool's Auto-Select in Phase 413, Select
+and Mask's Edge Detection in Phase 412) found the fix was smaller than
+the row suggested: all four textures (Canvas, Brick, Burlap, Sandstone)
+have existed since Phase 363, as `texturizer_with`'s own `texture`
+parameter — `conte_crayon` simply never called it, reaching instead
+for the plain `texturizer`, which only ever draws Canvas's own
+checkerboard. The fix is a one-line swap plus threading the choice
+through: `conte_crayon` gained a `texture: TexturizerTexture`
+parameter and now calls `self.texturizer_with(id, texture, ...)` in
+place of `self.texturizer(id, ...)`; the Tauri command takes it as
+`Option<TexturizerTexture>`, defaulting to Canvas so every existing
+caller keeps working unchanged.
+
+One new hand-computed test, verified the same way the existing
+checkerboard-relief test already verifies Canvas: `conte_crayon` with
+`texture: Brick` on a flat grey-128 fixture must produce exactly what
+`tone_mix`'s own flat 86 composed with `texturizer_with`'s own
+already-tested Brick relief produces, applied as two separate steps —
+and, since Brick's mortar lines land differently than Canvas's
+checkerboard, the result must differ from the Canvas-textured version
+at at least one pixel, proving the parameter is actually read rather
+than silently ignored. All 6 pre-existing Conté Crayon tests pass
+unmodified, confirming the Canvas default reproduces the exact old
+output.
+
+Frontend: the Conté Crayon dialog gained a Texture selector — Canvas/
+Brick/Burlap/Sandstone, the same four options and copy the standalone
+Texturizer dialog already offers — defaulting to Canvas. No new pure
+logic, so the frontend test count is unchanged. `cargo fmt`/`clippy
+--all-targets -D warnings`/`test` and `npx tsc --noEmit`/`npm run
+build`/`npm test` all clean.
+
+Tests: 1962 Rust (1961 → 1962: one new test), 39 frontend (unchanged).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

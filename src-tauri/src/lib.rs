@@ -6412,7 +6412,7 @@ fn chalk_and_charcoal(
 /// Filter Gallery > Sketch > Conté Crayon on layer `id`. `light_direction`
 /// as Texturizer's: 0 top, clockwise to 7 top-left. `foreground_color`/
 /// `background_color` default to black/white, Photoshop's own toolbox
-/// defaults.
+/// defaults. `texture` defaults to Canvas.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 fn conte_crayon(
@@ -6426,6 +6426,7 @@ fn conte_crayon(
     invert: bool,
     foreground_color: Option<[u8; 3]>,
     background_color: Option<[u8; 3]>,
+    texture: Option<document::TexturizerTexture>,
 ) -> Result<Snapshot, String> {
     edit_checkpointed(&state, |document| {
         document.conte_crayon(
@@ -6438,6 +6439,7 @@ fn conte_crayon(
             invert,
             foreground_color.unwrap_or([0, 0, 0]),
             background_color.unwrap_or([255, 255, 255]),
+            texture.unwrap_or(document::TexturizerTexture::Canvas),
         )
     })
 }

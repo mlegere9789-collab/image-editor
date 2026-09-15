@@ -22611,14 +22611,14 @@ impl Document {
     /// and between the two a straight [`tone_mix`] ramp from one to the
     /// other — with the levels so high that paper sits below crayon, a
     /// hard threshold at the crayon level. The texture is then
-    /// [`Self::texturizer`]'s own — its `scale`, `relief`, `light_direction`
-    /// (`0..=7`, top clockwise to top-left), and `invert` — skipped at
-    /// Relief `0`. Alpha is kept and the selection confines it. Photoshop's
-    /// Brick / Burlap / Canvas / Sandstone textures and loading a texture
-    /// file are documented scope cuts: the texture is always
-    /// Texturizer's own checkerboard relief. Errors for a level out of
-    /// `1..=15`, a texture setting Texturizer refuses, or a locked or
-    /// unknown layer.
+    /// [`Self::texturizer_with`]'s own — `texture` (Canvas, Brick, Burlap
+    /// or Sandstone), `scale`, `relief`, `light_direction` (`0..=7`, top
+    /// clockwise to top-left), and `invert` — skipped at Relief `0`.
+    /// Alpha is kept and the selection confines it. Loading a texture
+    /// file is a documented scope cut: the texture is always one of
+    /// Texturizer's own four built-in height fields. Errors for a level
+    /// out of `1..=15`, a texture setting Texturizer refuses, or a
+    /// locked or unknown layer.
     #[allow(clippy::too_many_arguments)]
     pub fn conte_crayon(
         &mut self,
@@ -22631,6 +22631,7 @@ impl Document {
         invert: bool,
         foreground_color: [u8; 3],
         background_color: [u8; 3],
+        texture: TexturizerTexture,
     ) -> Result<Option<Rect>, String> {
         if !(1..=15).contains(&foreground_level) {
             return Err("Conté Crayon Foreground Level must be between 1 and 15.".to_string());
@@ -22674,7 +22675,7 @@ impl Document {
         if relief == 0 {
             return Ok(touched);
         }
-        self.texturizer(id, scale, relief, light_direction, invert)
+        self.texturizer_with(id, texture, scale, relief, light_direction, invert)
     }
 
     /// Filter Gallery > Sketch > Plaster: pre-smooths the layer with
@@ -65442,8 +65443,19 @@ colorspaces:
         let (mut doc, id) = grey_pixels_4x4([
             50, 128, 200, 94, 195, 0, 255, 196, 93, 128, 128, 128, 50, 50, 200, 200,
         ]);
-        doc.conte_crayon(id, 11, 7, 1, 0, 7, false, [0, 0, 0], [255, 255, 255])
-            .unwrap();
+        doc.conte_crayon(
+            id,
+            11,
+            7,
+            1,
+            0,
+            7,
+            false,
+            [0, 0, 0],
+            [255, 255, 255],
+            TexturizerTexture::Canvas,
+        )
+        .unwrap();
         let red = |x: u32, y: u32| pixel(&doc, id, x, y);
         assert_eq!(red(0, 0), [0, 0, 0, 255]);
         assert_eq!(red(1, 0), [86, 86, 86, 255]);
@@ -65464,14 +65476,36 @@ colorspaces:
             128, 129, 8, 247, 128, 0, 255, 9, 246, 64, 192, 100, 150, 20, 230, 128,
         ]);
         let mut ramp = doc.clone();
-        doc.conte_crayon(id, 15, 15, 1, 0, 7, false, [0, 0, 0], [255, 255, 255])
-            .unwrap();
+        doc.conte_crayon(
+            id,
+            15,
+            15,
+            1,
+            0,
+            7,
+            false,
+            [0, 0, 0],
+            [255, 255, 255],
+            TexturizerTexture::Canvas,
+        )
+        .unwrap();
         assert_eq!(pixel(&doc, id, 0, 0)[0], 0);
         assert_eq!(pixel(&doc, id, 1, 0)[0], 255);
         assert_eq!(pixel(&doc, id, 1, 1)[0], 0);
         assert_eq!(pixel(&doc, id, 2, 1)[0], 255);
-        ramp.conte_crayon(id, 1, 1, 1, 0, 7, false, [0, 0, 0], [255, 255, 255])
-            .unwrap();
+        ramp.conte_crayon(
+            id,
+            1,
+            1,
+            1,
+            0,
+            7,
+            false,
+            [0, 0, 0],
+            [255, 255, 255],
+            TexturizerTexture::Canvas,
+        )
+        .unwrap();
         assert_eq!(pixel(&ramp, id, 2, 0)[0], 0); // 8 ≤ 8.53
         assert_eq!(pixel(&ramp, id, 3, 0)[0], 255); // 247 ≥ 246.47
         assert_eq!(pixel(&ramp, id, 0, 1)[0], 128); // (128 − 8.53) / 237.9 · 255 = 128.0
@@ -65497,7 +65531,8 @@ colorspaces:
         ]);
         let fg = [0, 50, 100];
         let bg = [100, 150, 200];
-        doc.conte_crayon(id, 1, 1, 1, 0, 7, false, fg, bg).unwrap();
+        doc.conte_crayon(id, 1, 1, 1, 0, 7, false, fg, bg, TexturizerTexture::Canvas)
+            .unwrap();
         assert_eq!(pixel(&doc, id, 2, 0), [0, 50, 100, 255]);
         assert_eq!(pixel(&doc, id, 3, 0), [100, 150, 200, 255]);
         assert_eq!(pixel(&doc, id, 0, 1), [50, 100, 150, 255]);
@@ -65510,24 +65545,125 @@ colorspaces:
         // pixel whose toward and away cells match keeps 86, one whose
         // away cell is low drops to 76; Invert lifts it to 96 instead.
         let (mut doc, id) = grey_pixels_4x4([128; 16]);
-        doc.conte_crayon(id, 11, 7, 1, 10, 7, false, [0, 0, 0], [255, 255, 255])
-            .unwrap();
+        doc.conte_crayon(
+            id,
+            11,
+            7,
+            1,
+            10,
+            7,
+            false,
+            [0, 0, 0],
+            [255, 255, 255],
+            TexturizerTexture::Canvas,
+        )
+        .unwrap();
         assert_eq!(pixel(&doc, id, 1, 1)[0], 86);
         assert_eq!(pixel(&doc, id, 0, 0)[0], 86);
         assert_eq!(pixel(&doc, id, 1, 0)[0], 76);
         assert_eq!(pixel(&doc, id, 0, 1)[0], 76);
         let (mut composed, id_b) = grey_pixels_4x4([128; 16]);
         composed
-            .conte_crayon(id_b, 11, 7, 1, 0, 7, false, [0, 0, 0], [255, 255, 255])
+            .conte_crayon(
+                id_b,
+                11,
+                7,
+                1,
+                0,
+                7,
+                false,
+                [0, 0, 0],
+                [255, 255, 255],
+                TexturizerTexture::Canvas,
+            )
             .unwrap();
         composed.texturizer(id_b, 1, 10, 7, false).unwrap();
         assert_eq!(doc.layers()[0].pixels, composed.layers()[0].pixels);
         let (mut inverted, id_c) = grey_pixels_4x4([128; 16]);
         inverted
-            .conte_crayon(id_c, 11, 7, 1, 10, 7, true, [0, 0, 0], [255, 255, 255])
+            .conte_crayon(
+                id_c,
+                11,
+                7,
+                1,
+                10,
+                7,
+                true,
+                [0, 0, 0],
+                [255, 255, 255],
+                TexturizerTexture::Canvas,
+            )
             .unwrap();
         assert_eq!(pixel(&inverted, id_c, 1, 0)[0], 96);
         assert_eq!(pixel(&inverted, id_c, 1, 1)[0], 86);
+    }
+
+    #[test]
+    fn conte_crayon_honours_a_chosen_texture_instead_of_always_canvas() {
+        // Same flat grey 128 fixture and levels/relief as the checkerboard
+        // test above, but Brick in place of the Canvas default. Verified
+        // the same way that test verifies Canvas: conte_crayon's own
+        // output must equal tone_mix's flat 86 composed with
+        // texturizer_with's own already-tested Brick relief, applied as
+        // two separate steps -- and, since Brick's own mortar lines land
+        // differently than Canvas's checkerboard, the result must differ
+        // from the Canvas-textured version above at at least one pixel,
+        // proving the texture choice is actually read rather than
+        // silently ignored.
+        let (mut canvas, id_canvas) = grey_pixels_4x4([128; 16]);
+        canvas
+            .conte_crayon(
+                id_canvas,
+                11,
+                7,
+                1,
+                10,
+                7,
+                false,
+                [0, 0, 0],
+                [255, 255, 255],
+                TexturizerTexture::Canvas,
+            )
+            .unwrap();
+        let (mut brick, id) = grey_pixels_4x4([128; 16]);
+        brick
+            .conte_crayon(
+                id,
+                11,
+                7,
+                1,
+                10,
+                7,
+                false,
+                [0, 0, 0],
+                [255, 255, 255],
+                TexturizerTexture::Brick,
+            )
+            .unwrap();
+        let (mut composed, id_b) = grey_pixels_4x4([128; 16]);
+        composed
+            .conte_crayon(
+                id_b,
+                11,
+                7,
+                1,
+                0,
+                7,
+                false,
+                [0, 0, 0],
+                [255, 255, 255],
+                TexturizerTexture::Brick,
+            )
+            .unwrap();
+        composed
+            .texturizer_with(id_b, TexturizerTexture::Brick, 1, 10, 7, false)
+            .unwrap();
+        assert_eq!(brick.layers()[0].pixels, composed.layers()[0].pixels);
+        assert_ne!(
+            brick.layers()[0].pixels,
+            canvas.layers()[0].pixels,
+            "Brick's own mortar lines land differently than Canvas's checkerboard"
+        );
     }
 
     #[test]
@@ -65537,15 +65673,37 @@ colorspaces:
             .add_layer("two", &[128, 128, 128, 77, 200, 200, 200, 255], 2, 1)
             .unwrap();
         doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
-        doc.conte_crayon(id, 11, 7, 1, 0, 7, false, [0, 0, 0], [255, 255, 255])
-            .unwrap();
+        doc.conte_crayon(
+            id,
+            11,
+            7,
+            1,
+            0,
+            7,
+            false,
+            [0, 0, 0],
+            [255, 255, 255],
+            TexturizerTexture::Canvas,
+        )
+        .unwrap();
         assert_eq!(pixel(&doc, id, 0, 0), [86, 86, 86, 77]);
         assert_eq!(pixel(&doc, id, 1, 0), [200, 200, 200, 255]);
         // Colour is reduced through its luma: pure red (luma 76) is crayon.
         let mut colour = Document::new(1, 1).unwrap();
         let cid = colour.add_layer("red", &[255, 0, 0, 255], 1, 1).unwrap();
         colour
-            .conte_crayon(cid, 11, 7, 1, 0, 7, false, [0, 0, 0], [255, 255, 255])
+            .conte_crayon(
+                cid,
+                11,
+                7,
+                1,
+                0,
+                7,
+                false,
+                [0, 0, 0],
+                [255, 255, 255],
+                TexturizerTexture::Canvas,
+            )
             .unwrap();
         assert_eq!(pixel(&colour, cid, 0, 0), [0, 0, 0, 255]);
     }
@@ -65555,39 +65713,138 @@ colorspaces:
         let (mut doc, id) = grey_pixels_4x4([128; 16]);
         let before = doc.layers()[0].pixels.clone();
         assert!(doc
-            .conte_crayon(id, 0, 7, 1, 0, 7, false, [0, 0, 0], [255, 255, 255])
+            .conte_crayon(
+                id,
+                0,
+                7,
+                1,
+                0,
+                7,
+                false,
+                [0, 0, 0],
+                [255, 255, 255],
+                TexturizerTexture::Canvas
+            )
             .unwrap_err()
             .contains("Foreground"));
         assert!(doc
-            .conte_crayon(id, 16, 7, 1, 0, 7, false, [0, 0, 0], [255, 255, 255])
+            .conte_crayon(
+                id,
+                16,
+                7,
+                1,
+                0,
+                7,
+                false,
+                [0, 0, 0],
+                [255, 255, 255],
+                TexturizerTexture::Canvas
+            )
             .unwrap_err()
             .contains("Foreground"));
         assert!(doc
-            .conte_crayon(id, 11, 0, 1, 0, 7, false, [0, 0, 0], [255, 255, 255])
+            .conte_crayon(
+                id,
+                11,
+                0,
+                1,
+                0,
+                7,
+                false,
+                [0, 0, 0],
+                [255, 255, 255],
+                TexturizerTexture::Canvas
+            )
             .unwrap_err()
             .contains("Background"));
         assert!(doc
-            .conte_crayon(id, 11, 7, 0, 0, 7, false, [0, 0, 0], [255, 255, 255])
+            .conte_crayon(
+                id,
+                11,
+                7,
+                0,
+                0,
+                7,
+                false,
+                [0, 0, 0],
+                [255, 255, 255],
+                TexturizerTexture::Canvas
+            )
             .unwrap_err()
             .contains("Scaling"));
         assert!(doc
-            .conte_crayon(id, 11, 7, 251, 0, 7, false, [0, 0, 0], [255, 255, 255])
+            .conte_crayon(
+                id,
+                11,
+                7,
+                251,
+                0,
+                7,
+                false,
+                [0, 0, 0],
+                [255, 255, 255],
+                TexturizerTexture::Canvas
+            )
             .unwrap_err()
             .contains("Scaling"));
         assert!(doc
-            .conte_crayon(id, 11, 7, 1, 51, 7, false, [0, 0, 0], [255, 255, 255])
+            .conte_crayon(
+                id,
+                11,
+                7,
+                1,
+                51,
+                7,
+                false,
+                [0, 0, 0],
+                [255, 255, 255],
+                TexturizerTexture::Canvas
+            )
             .unwrap_err()
             .contains("Relief"));
         assert!(doc
-            .conte_crayon(id, 11, 7, 1, 0, 8, false, [0, 0, 0], [255, 255, 255])
+            .conte_crayon(
+                id,
+                11,
+                7,
+                1,
+                0,
+                8,
+                false,
+                [0, 0, 0],
+                [255, 255, 255],
+                TexturizerTexture::Canvas
+            )
             .unwrap_err()
             .contains("Light"));
         assert!(doc
-            .conte_crayon(999, 11, 7, 1, 0, 7, false, [0, 0, 0], [255, 255, 255])
+            .conte_crayon(
+                999,
+                11,
+                7,
+                1,
+                0,
+                7,
+                false,
+                [0, 0, 0],
+                [255, 255, 255],
+                TexturizerTexture::Canvas
+            )
             .is_err());
         doc.set_locked(id, true).unwrap();
         assert!(doc
-            .conte_crayon(id, 11, 7, 1, 0, 7, false, [0, 0, 0], [255, 255, 255])
+            .conte_crayon(
+                id,
+                11,
+                7,
+                1,
+                0,
+                7,
+                false,
+                [0, 0, 0],
+                [255, 255, 255],
+                TexturizerTexture::Canvas
+            )
             .unwrap_err()
             .contains("locked"));
         assert_eq!(doc.layers()[0].pixels, before);
