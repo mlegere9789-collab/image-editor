@@ -2457,6 +2457,8 @@ export default function App() {
   const [tiltShiftAngle, setTiltShiftAngle] = useState(0);
   const [tiltShiftDistortion, setTiltShiftDistortion] = useState(0);
   const [tiltShiftSymmetric, setTiltShiftSymmetric] = useState(false);
+  const [tiltShiftFeatherTop, setTiltShiftFeatherTop] = useState(15);
+  const [tiltShiftFeatherBottom, setTiltShiftFeatherBottom] = useState(15);
   const [showIrisBlurDialog, setShowIrisBlurDialog] = useState(false);
   const [irisBlurCenterX, setIrisBlurCenterX] = useState(0);
   const [irisBlurCenterY, setIrisBlurCenterY] = useState(0);
@@ -8798,12 +8800,18 @@ export default function App() {
 
   const openTiltShiftDialog = useCallback(() => {
     setTiltShiftFocusRow(Math.round((document?.height ?? 2) / 2));
+    // Start both feather rings equal to the plain Blur Radius, the same
+    // uniform transition the tool always had before this phase, letting
+    // a caller who never touches the new sliders see the exact same
+    // result as before.
+    setTiltShiftFeatherTop(tiltShiftBlurRadius);
+    setTiltShiftFeatherBottom(tiltShiftBlurRadius);
     setShowTiltShiftDialog(true);
-  }, [document]);
+  }, [document, tiltShiftBlurRadius]);
 
   const applyTiltShift = useCallback(async () => {
     if (selectedId === null) return;
-    await runCommand("tilt_shift_with", {
+    await runCommand("tilt_shift_feather_with", {
       id: selectedId,
       focusRow: tiltShiftFocusRow,
       halfHeight: tiltShiftHalfHeight,
@@ -8811,6 +8819,8 @@ export default function App() {
       angle: tiltShiftAngle,
       distortion: tiltShiftDistortion,
       symmetric: tiltShiftSymmetric,
+      featherTop: tiltShiftFeatherTop,
+      featherBottom: tiltShiftFeatherBottom,
     });
     setShowTiltShiftDialog(false);
   }, [
@@ -8822,6 +8832,8 @@ export default function App() {
     tiltShiftAngle,
     tiltShiftDistortion,
     tiltShiftSymmetric,
+    tiltShiftFeatherTop,
+    tiltShiftFeatherBottom,
   ]);
 
   const openIrisBlurDialog = useCallback(() => {
@@ -36048,6 +36060,30 @@ export default function App() {
                 }
               />
             </label>
+            {(
+              [
+                ["Feather: Top", tiltShiftFeatherTop, setTiltShiftFeatherTop],
+                [
+                  "Feather: Bottom",
+                  tiltShiftFeatherBottom,
+                  setTiltShiftFeatherBottom,
+                ],
+              ] as const
+            ).map(([label, value, set]) => (
+              <label className="control" key={label}>
+                <span className="control__label">
+                  {label}
+                  <span className="control__value">{value}px</span>
+                </span>
+                <input
+                  type="range"
+                  min={1}
+                  max={100}
+                  value={value}
+                  onChange={(event) => set(Number(event.target.value))}
+                />
+              </label>
+            ))}
             <div className="modal__actions">
               <button
                 className="button button--quiet"

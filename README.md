@@ -25048,6 +25048,54 @@ clean.
 Tests: 1966 Rust (1964 → 1966: two new tests), 39 frontend
 (unchanged).
 
+## Phase 429 — Tilt-Shift's Two Independent Feather Rings
+
+The same Blur Gallery priority Phase 428 opened, closing Tilt-Shift's
+own analogous scope cut: one uniform transition width tied to
+`blur_radius`, where Photoshop's own tool gives the two feather lines
+either side of the sharp band an independently adjustable width.
+
+Tilt-Shift's own geometry made this simpler than Iris Blur's: a
+pixel's `signed` distance from the band already carries which side it
+falls on (negative above the band at angle 0, zero or positive below),
+so the new `tilt_shift_feather_with` just picks `feather_top` or
+`feather_bottom` by that sign — no angular blending needed, unlike
+Iris Blur's four-quadrant `cos²θ`/`sin²θ` weighting, since a 1D band
+only ever has two sides. `tilt_shift_with` itself is now a direct
+call to the new sibling with both feathers equal to `blur_radius`: `signed
+>= 0.0` and `signed < 0.0` are the only two branches, and either always
+reads that same value, so the delegation reproduces the old formula
+exactly. The blur kernel itself (`blur_radius`) stays one value, the
+same separation Iris Blur's own feather widths already keep from their
+own kernel radius.
+
+Two new hand-computed tests, reusing `tilt_shift_keeps_the_focus_row_
+sharp_and_blurs_the_rest`'s own already-verified geometry directly:
+narrowing only `feather_top` from the uniform `2` to `1` drives row 0
+(above the focus row)'s own blend to `(1 − 0) / 1 = 1.0`, fully
+blurred — landing on its own already-verified raw box-blur average,
+`(34, 38, 42)`, instead of that test's own blended `(22, 29, 36)`. Row
+2, below the focus row, is unaffected (its own blend never reads
+`feather_top`) and keeps its own uniform-case values, `(64, 71, 78)`,
+proving the change stays confined to the side its own ring owns. A
+second test confirms each feather is refused at `0`, the same floor
+`blur_radius` already enforces. All 5 pre-existing Tilt-Shift tests
+pass unmodified.
+
+Frontend: the Tilt-Shift dialog gained two new sliders (Feather:
+Top/Bottom, 1–100px), both reset to the current Blur Radius whenever
+the dialog opens — so a caller who never touches them sees exactly the
+old uniform behaviour — and `applyTiltShift` now calls the new
+`tilt_shift_feather_with` command. On-canvas dragging of the two
+feather lines remains a documented scope cut, joining Iris Blur's own
+feather widths and this tool's own angle as dialog-only controls. No
+new frontend pure logic, so the frontend test count is unchanged.
+`cargo fmt`/`clippy --all-targets -D warnings`/`test` and `npx tsc
+--noEmit`/`npm run build`/`npm test` all clean.
+
+Tests: 1968 Rust (1966 → 1968: two new tests), 39 frontend
+(unchanged).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

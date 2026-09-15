@@ -26770,13 +26770,10 @@ impl Document {
     /// `blur_radius` rows past the sharp band); the final colour is
     /// `original * (1 − blend) + blurred * blend` per RGB channel, alpha
     /// untouched. Photoshop's own version lets the sharp band run at any
-    /// angle and gives each of its two feather rings an independently
-    /// draggable width, plus a separate Distortion slider; here the band
-    /// is always horizontal and the feather width is tied directly to
-    /// `blur_radius` — both documented scope cuts, along with Field Blur
-    /// and Iris Blur (Blur Gallery siblings with their own arbitrary-
-    /// point or elliptical falloff shapes, not this one's single
-    /// horizontal band).
+    /// angle; here it is always horizontal — a documented scope cut,
+    /// along with Field Blur and Iris Blur (Blur Gallery siblings with
+    /// their own arbitrary-point or elliptical falloff shapes, not this
+    /// one's single horizontal band).
     pub fn tilt_shift(
         &mut self,
         id: LayerId,
@@ -26807,8 +26804,50 @@ impl Document {
         distortion: i32,
         symmetric: bool,
     ) -> Result<Option<Rect>, String> {
+        self.tilt_shift_feather_with(
+            id,
+            focus_row,
+            half_height,
+            blur_radius,
+            angle,
+            distortion,
+            symmetric,
+            blur_radius,
+            blur_radius,
+        )
+    }
+
+    /// [`Self::tilt_shift_with`] with Photoshop's own two independently
+    /// draggable feather rings in place of one width tied to
+    /// `blur_radius`: `feather_top` is the transition width, in pixels,
+    /// on the side of the band where `signed` (the same signed distance
+    /// `tilt_shift_with` itself computes) is negative -- above the band
+    /// at angle 0 -- and `feather_bottom` the side where it is zero or
+    /// positive. `tilt_shift_with` itself now just calls this with both
+    /// equal to `blur_radius`, reproducing its own old single-width
+    /// formula exactly: `signed >= 0.0` and `signed < 0.0` are the only
+    /// two branches, and either one reads the same `blur_radius` value.
+    /// The blur kernel itself (`blur_radius`, [`box_blur_at`]'s own
+    /// radius) stays one value, exactly as [`Self::iris_blur_feather_with`]
+    /// already keeps its own kernel separate from its own feather widths.
+    #[allow(clippy::too_many_arguments)]
+    pub fn tilt_shift_feather_with(
+        &mut self,
+        id: LayerId,
+        focus_row: u32,
+        half_height: u32,
+        blur_radius: u32,
+        angle: f32,
+        distortion: i32,
+        symmetric: bool,
+        feather_top: u32,
+        feather_bottom: u32,
+    ) -> Result<Option<Rect>, String> {
         if blur_radius == 0 {
             return Err("Tilt-Shift blur radius must be at least 1 pixel.".to_string());
+        }
+        if feather_top == 0 || feather_bottom == 0 {
+            return Err("Tilt-Shift feather widths must be at least 1 pixel.".to_string());
         }
         if !angle.is_finite() || !(-90.0..=90.0).contains(&angle) {
             return Err("Tilt-Shift angle must be between -90 and 90 degrees.".to_string());
@@ -26839,8 +26878,12 @@ impl Document {
                     continue;
                 }
                 let signed = (col as f32 - pivot_x) * nx + (row as f32 - focus_row as f32) * ny;
-                let blend =
-                    ((signed.abs() - half_height as f32) / blur_radius as f32).clamp(0.0, 1.0);
+                let feather = if signed >= 0.0 {
+                    feather_bottom
+                } else {
+                    feather_top
+                } as f32;
+                let blend = ((signed.abs() - half_height as f32) / feather).clamp(0.0, 1.0);
                 let mut blurred = box_blur_at(&source, doc_width, width, height, row, col, r);
                 let distorted_side = symmetric
                     || (distortion > 0 && signed > 0.0)
@@ -54503,6 +54546,49 @@ mod tests {
         let before = doc.layers()[0].pixels.clone();
         doc.tilt_shift(id, 1, 1, 2).unwrap();
         assert_eq!(doc.layers()[0].pixels, before);
+    }
+
+    #[test]
+    fn tilt_shift_feather_narrows_the_transition_only_on_the_side_its_own_ring_owns() {
+        // Same ramped_3x3, focus row 1, half-height 0, blur radius 2 as
+        // `tilt_shift_keeps_the_focus_row_sharp_and_blurs_the_rest`
+        // above, whose own hand-computed values this test reuses
+        // directly: row 0 (above the focus row, the "top" side) blends
+        // its own original (10, 20, 30) halfway with its own raw
+        // box-blur average (34, 38, 42) at the uniform feather 2 for a
+        // final (22, 29, 36); row 2 (below, "bottom") blends (70, 80,
+        // 90) with its own average (58, 62, 66) for a final (64, 71, 78).
+        //
+        // Narrowing only feather_top to 1 (feather_bottom stays 2, the
+        // uniform blur_radius) drives row 0's own blend to (1 − 0) / 1 =
+        // 1.0, fully blurred: it lands on its own raw average (34, 38,
+        // 42) instead of (22, 29, 36). Row 2 is unaffected -- its own
+        // blend never reads feather_top -- and keeps its own
+        // uniform-case values (64, 71, 78), proving the change stays
+        // confined to the side its own ring owns.
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        doc.tilt_shift_feather_with(id, 1, 0, 2, 0.0, 0, false, 1, 2)
+            .unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(p[idx(0, 0)], 34);
+        assert_eq!(p[idx(1, 0)], 38);
+        assert_eq!(p[idx(2, 0)], 42);
+        assert_eq!(p[idx(0, 2)], 64);
+        assert_eq!(p[idx(1, 2)], 71);
+        assert_eq!(p[idx(2, 2)], 78);
+        assert_eq!(p[idx(1, 1)], 50, "still sharp at the focus row itself");
+    }
+
+    #[test]
+    fn tilt_shift_feather_rejects_a_zero_width_ring() {
+        let (mut doc, id) = ramped_3x3();
+        assert!(doc
+            .tilt_shift_feather_with(id, 1, 0, 2, 0.0, 0, false, 0, 2)
+            .is_err());
+        assert!(doc
+            .tilt_shift_feather_with(id, 1, 0, 2, 0.0, 0, false, 2, 0)
+            .is_err());
     }
 
     #[test]

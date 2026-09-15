@@ -3258,6 +3258,38 @@ fn tilt_shift_with(
     })
 }
 
+/// Blur Gallery > Tilt-Shift on layer `id` with Photoshop's own two
+/// independently draggable feather rings in place of one uniform
+/// transition width.
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+fn tilt_shift_feather_with(
+    state: State<'_, AppState>,
+    id: LayerId,
+    focus_row: u32,
+    half_height: u32,
+    blur_radius: u32,
+    angle: f32,
+    distortion: i32,
+    symmetric: bool,
+    feather_top: u32,
+    feather_bottom: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.tilt_shift_feather_with(
+            id,
+            focus_row,
+            half_height,
+            blur_radius,
+            angle,
+            distortion,
+            symmetric,
+            feather_top,
+            feather_bottom,
+        )
+    })
+}
+
 /// Blur Gallery > Iris Blur on layer `id` with its ellipse's aspect and
 /// rotation.
 #[allow(clippy::too_many_arguments)]
@@ -8822,6 +8854,7 @@ pub fn run() {
             lens_flare_with,
             lighting_effects_with,
             tilt_shift_with,
+            tilt_shift_feather_with,
             iris_blur_with,
             iris_blur_feather_with,
             spin_blur_with,
