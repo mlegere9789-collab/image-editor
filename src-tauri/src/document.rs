@@ -23174,6 +23174,27 @@ impl Document {
         color: [u8; 3],
         opacity: u32,
     ) -> Result<Option<Rect>, String> {
+        self.color_overlay_with(id, color, opacity, BlendMode::Normal)
+    }
+
+    /// [`Self::color_overlay`] with a choice of [`BlendMode`], narrowing
+    /// its own "Photoshop's Normal blend mode only" scope cut: each
+    /// channel first runs through `blend_mode`'s own `B(Cb, Cs)` (the
+    /// same separable-blend math every layer's own Blend Mode already
+    /// uses to composite onto the layer below it — Multiply, Screen,
+    /// Overlay, and the rest), and *that* result is what Opacity mixes
+    /// toward rather than the flat colour itself: `v * (1.0 - frac) +
+    /// blend(v, target) * frac`. `BlendMode::Normal`'s own `B(Cb, Cs) =
+    /// Cs` collapses this back to exactly [`Self::color_overlay`]'s
+    /// original formula, so that function's own behaviour — and every
+    /// test written against it — is unchanged.
+    pub fn color_overlay_with(
+        &mut self,
+        id: LayerId,
+        color: [u8; 3],
+        opacity: u32,
+        blend_mode: BlendMode,
+    ) -> Result<Option<Rect>, String> {
         if opacity > 100 {
             return Err("Color Overlay opacity must be between 0 and 100.".to_string());
         }
@@ -23182,17 +23203,12 @@ impl Document {
             if a == 0 {
                 return [r, g, b, a];
             }
-            let blend = |v: u8, target: u8| -> u8 {
-                (v as f32 * (1.0 - frac) + target as f32 * frac)
-                    .round()
-                    .clamp(0.0, 255.0) as u8
+            let mix = |v: u8, target: u8| -> u8 {
+                let cb = to_unit(v);
+                let blended = blend_mode.blend(cb, to_unit(target));
+                to_byte(cb * (1.0 - frac) + blended * frac)
             };
-            [
-                blend(r, color[0]),
-                blend(g, color[1]),
-                blend(b, color[2]),
-                a,
-            ]
+            [mix(r, color[0]), mix(g, color[1]), mix(b, color[2]), a]
         })
     }
 
@@ -46461,6 +46477,50 @@ mod tests {
         for x in 0..4 {
             assert_eq!(&p[idx(x, 0)..idx(x, 0) + 4], [255, 0, 0, 255]);
         }
+    }
+
+    #[test]
+    fn color_overlay_with_multiply_blends_the_colour_first_then_mixes_by_opacity() {
+        // Same column-stripes fixture as color_overlay's own tests
+        // (columns 0-3 at R=G=B = 10, 20, 30, 40), overlaid with red
+        // (255, 0, 0) at opacity 100 -- but through Multiply instead of
+        // Normal. Multiply's own B(Cb, Cs) = Cb * Cs: the red channel's
+        // Cs = 255/255 = 1.0, so Cb * 1.0 leaves R exactly as it started
+        // (10, 20, 30, 40) rather than color_overlay's own Normal
+        // behaviour, which at opacity 100 replaces R with 255 outright
+        // (color_overlay_full_opacity_replaces_the_colour_entirely,
+        // right above) -- a real, contrasting result proving the blend
+        // mode actually changes what gets mixed in, not just documenting
+        // an argument nobody reads. G and B's own Cs = 0, so Cb * 0 = 0
+        // regardless of the original value: both collapse to 0 at this
+        // opacity, same as Normal's own full-opacity case would give for
+        // those two channels (0 either way, for different reasons).
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = column_stripes_fixture();
+        doc.color_overlay_with(id, [255, 0, 0], 100, BlendMode::Multiply)
+            .unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [10, 0, 0, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [20, 0, 0, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [30, 0, 0, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [40, 0, 0, 255]);
+    }
+
+    #[test]
+    fn color_overlay_with_normal_is_exactly_color_overlay() {
+        // BlendMode::Normal's own B(Cb, Cs) = Cs collapses color_overlay_with
+        // back to color_overlay's original formula -- checked here at a
+        // partial opacity (60, the existing blends_toward_the_solid_colour
+        // test's own case) byte for byte, not just at the two boundary
+        // opacities (0 and 100) the dedicated Normal-only tests already
+        // cover well enough to look like agreement by construction.
+        let (mut plain, id1) = column_stripes_fixture();
+        plain.color_overlay(id1, [255, 0, 0], 60).unwrap();
+        let (mut explicit, id2) = column_stripes_fixture();
+        explicit
+            .color_overlay_with(id2, [255, 0, 0], 60, BlendMode::Normal)
+            .unwrap();
+        assert_eq!(plain.layers()[0].pixels, explicit.layers()[0].pixels);
     }
 
     #[test]

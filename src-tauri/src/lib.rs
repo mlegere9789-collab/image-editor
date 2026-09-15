@@ -6605,9 +6605,10 @@ fn color_overlay(
     id: LayerId,
     color: [u8; 3],
     opacity: u32,
+    blend_mode: BlendMode,
 ) -> Result<Snapshot, String> {
     edit_checkpointed(&state, |document| {
-        document.color_overlay(id, color, opacity)
+        document.color_overlay_with(id, color, opacity, blend_mode)
     })
 }
 

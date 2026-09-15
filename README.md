@@ -23036,6 +23036,47 @@ calling the plain 4-argument `contour`) all clean.
 Tests: 1901 Rust (1899 → 1901), 33 frontend (unchanged — one dropdown,
 no new frontend logic).
 
+## Phase 391 — Color Overlay's Blend Mode
+
+Several layer-style effects share the same documented scope cut —
+"Photoshop's Normal blend mode only" — because each bakes its own
+contribution in with a flat opacity mix rather than the full separable
+blend-mode palette every ordinary layer already gets against the layer
+below it. This phase closes it for the first and simplest of them, Color
+Overlay: `Document::color_overlay` (unchanged, still Normal-only, still
+what every existing caller and test uses) delegates to the new
+`color_overlay_with(..., blend_mode: BlendMode)`, reusing `blend.rs`'s own
+`BlendMode::blend(Cb, Cs)` — the exact separable-blend math a layer's own
+Blend Mode already runs — rather than inventing a second implementation of
+Multiply, Screen, Overlay, and the rest. Each channel now runs through
+`blend_mode.blend(cb, cs)` first, and _that_ result is what Opacity mixes
+toward: `v * (1.0 - frac) + blend(v, target) * frac`. `BlendMode::Normal`'s
+own `B(Cb, Cs) = Cs` collapses this back to exactly `color_overlay`'s
+original formula, so nothing that shipped before this phase changed. The
+`color_overlay` Tauri command's own shape widened to take `blendMode`
+directly (the same pattern Phase 390's `contour` command just used); the
+dialog gained a Blend Mode dropdown, sourced from the same `blend_modes`
+list the Layers panel's own picker already fetches, right above the
+existing Color/Opacity controls.
+
+**Verified.** Two new Rust tests, hand-computed, plus all 6 pre-existing
+Color Overlay tests (unmodified) still pass unchanged. The Normal case:
+`color_overlay_with(..., BlendMode::Normal)` at a partial opacity (60, not
+just the boundary 0/100 cases the dedicated tests already cover) compared
+byte-for-byte against plain `color_overlay` — proving the collapse holds
+generally, not only by construction at the edges. The Multiply case, on
+the same column-stripes fixture (R=G=B = 10/20/30/40 across four columns)
+overlaid with red at opacity 100: the red channel's own `Cs = 1.0` makes
+`Cb * 1.0` leave R completely unchanged (10, 20, 30, 40) — a real,
+contrasting result against Normal's own full-opacity behaviour, which
+replaces R with 255 outright (the very next test in the file) — while
+green and blue's `Cs = 0` collapses both to 0 either way, for different
+reasons. `cargo fmt`/`clippy --all-targets -D warnings`/`test` and `npm
+run build`/`test` all clean.
+
+Tests: 1903 Rust (1901 → 1903), 33 frontend (unchanged — one dropdown
+reusing state and a list this session already fetches).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

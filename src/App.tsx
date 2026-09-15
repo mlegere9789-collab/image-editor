@@ -2020,6 +2020,8 @@ export default function App() {
   const [showColorOverlayDialog, setShowColorOverlayDialog] = useState(false);
   const [colorOverlayColor, setColorOverlayColor] = useState("#ff0000");
   const [colorOverlayOpacity, setColorOverlayOpacity] = useState(100);
+  const [colorOverlayBlendMode, setColorOverlayBlendMode] =
+    useState<BlendMode>("normal");
   const [showGradientOverlayDialog, setShowGradientOverlayDialog] =
     useState(false);
   const [gradientOverlayColor1, setGradientOverlayColor1] = useState("#000000");
@@ -6227,9 +6229,16 @@ export default function App() {
       id: selectedId,
       color: [r, g, b],
       opacity: colorOverlayOpacity,
+      blendMode: colorOverlayBlendMode,
     });
     setShowColorOverlayDialog(false);
-  }, [runCommand, selectedId, colorOverlayColor, colorOverlayOpacity]);
+  }, [
+    runCommand,
+    selectedId,
+    colorOverlayColor,
+    colorOverlayOpacity,
+    colorOverlayBlendMode,
+  ]);
 
   const applyGradientOverlay = useCallback(async () => {
     if (selectedId === null) return;
@@ -25236,6 +25245,21 @@ export default function App() {
                 value={colorOverlayColor}
                 onChange={(event) => setColorOverlayColor(event.target.value)}
               />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Blend Mode</span>
+              <select
+                value={colorOverlayBlendMode}
+                onChange={(event) =>
+                  setColorOverlayBlendMode(event.target.value as BlendMode)
+                }
+              >
+                {blendModes.map((info) => (
+                  <option key={info.mode} value={info.mode}>
+                    {info.label}
+                  </option>
+                ))}
+              </select>
             </label>
             <label className="control">
               <span className="control__label">
