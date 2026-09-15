@@ -11807,6 +11807,14 @@ export default function App() {
         void runCommand("set_layer_opacity", { id, opacity })
       }
       onOpacityDragStart={checkpoint}
+      onMaskDensity={(id, density) =>
+        void runCommand("set_mask_density", { id, density })
+      }
+      onMaskDensityDragStart={checkpoint}
+      onMaskFeather={(id, radius) =>
+        void runCommand("set_mask_feather", { id, radius })
+      }
+      onMaskFeatherDragStart={checkpoint}
       onBlendMode={(id, blendMode: BlendMode) =>
         void runCommand("set_layer_blend_mode", { id, blendMode })
       }

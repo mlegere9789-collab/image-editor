@@ -1,7 +1,13 @@
 import { useEffect, useState } from "react";
 
 import type React from "react";
-import type { BlendMode, BlendModeInfo, LayerGroup, LayerView, MoveDirection } from "./types";
+import type {
+  BlendMode,
+  BlendModeInfo,
+  LayerGroup,
+  LayerView,
+  MoveDirection,
+} from "./types";
 
 type Props = {
   /** Extra panels rendered under the layer list (the Channels panel). */
@@ -24,6 +30,17 @@ type Props = {
   /** Called once, when an opacity drag starts, so the whole drag undoes as
    * one step rather than one step per `onOpacity` call it makes. */
   onOpacityDragStart: () => void;
+  /** Properties panel's Mask Density, 0..=1; only called when `hasMask`. */
+  onMaskDensity: (id: number, density: number) => void;
+  /** Same one-step-undo purpose as `onOpacityDragStart`, for the Mask
+   * Density slider. */
+  onMaskDensityDragStart: () => void;
+  /** Properties panel's Mask Feather radius in pixels; only called when
+   * `hasMask`. */
+  onMaskFeather: (id: number, radius: number) => void;
+  /** Same one-step-undo purpose as `onOpacityDragStart`, for the Mask
+   * Feather slider. */
+  onMaskFeatherDragStart: () => void;
   onBlendMode: (id: number, mode: BlendMode) => void;
   onMove: (id: number, direction: MoveDirection) => void;
   onRemove: (id: number) => void;
@@ -53,6 +70,10 @@ export default function LayerPanel({
   onUngroup,
   onOpacity,
   onOpacityDragStart,
+  onMaskDensity,
+  onMaskDensityDragStart,
+  onMaskFeather,
+  onMaskFeatherDragStart,
   onBlendMode,
   onMove,
   onRemove,
@@ -70,22 +91,64 @@ export default function LayerPanel({
   // thumb snaps backwards mid-drag. The draft holds the in-flight value until
   // the model catches up.
   const [draftOpacity, setDraftOpacity] = useState<number | null>(null);
+  const [draftMaskDensity, setDraftMaskDensity] = useState<number | null>(null);
+  const [draftMaskFeather, setDraftMaskFeather] = useState<number | null>(null);
 
   const selected = layers.find((layer) => layer.id === selectedId) ?? null;
 
   useEffect(() => {
     setDraftOpacity(null);
+    setDraftMaskDensity(null);
+    setDraftMaskFeather(null);
   }, [selectedId]);
 
   useEffect(() => {
-    if (draftOpacity !== null && selected && Math.abs(selected.opacity - draftOpacity) < 1e-6) {
+    if (
+      draftOpacity !== null &&
+      selected &&
+      Math.abs(selected.opacity - draftOpacity) < 1e-6
+    ) {
       setDraftOpacity(null);
     }
   }, [draftOpacity, selected]);
 
+  useEffect(() => {
+    if (
+      draftMaskDensity !== null &&
+      selected &&
+      Math.abs(selected.maskDensity - draftMaskDensity) < 1e-6
+    ) {
+      setDraftMaskDensity(null);
+    }
+  }, [draftMaskDensity, selected]);
+
+  useEffect(() => {
+    if (
+      draftMaskFeather !== null &&
+      selected &&
+      selected.maskFeather === draftMaskFeather
+    ) {
+      setDraftMaskFeather(null);
+    }
+  }, [draftMaskFeather, selected]);
+
   /** Opacity to display for a layer: the draft wins for the one being dragged. */
   const shownOpacity = (layer: LayerView) =>
-    layer.id === selectedId && draftOpacity !== null ? draftOpacity : layer.opacity;
+    layer.id === selectedId && draftOpacity !== null
+      ? draftOpacity
+      : layer.opacity;
+
+  /** Same draft-wins-during-a-drag rule as `shownOpacity`, for Mask Density. */
+  const shownMaskDensity = (layer: LayerView) =>
+    layer.id === selectedId && draftMaskDensity !== null
+      ? draftMaskDensity
+      : layer.maskDensity;
+
+  /** Same draft-wins-during-a-drag rule as `shownOpacity`, for Mask Feather. */
+  const shownMaskFeather = (layer: LayerView) =>
+    layer.id === selectedId && draftMaskFeather !== null
+      ? draftMaskFeather
+      : layer.maskFeather;
 
   // The stack is stored bottom-first but reads top-first, like every other
   // layers panel.
@@ -103,22 +166,31 @@ export default function LayerPanel({
             <li
               key={layer.id}
               className={`layer${layer.id === selectedId ? " layer--selected" : ""}${
-                groups.some((group) => group.members.includes(layer.id)) ? " layer--grouped" : ""
+                groups.some((group) => group.members.includes(layer.id))
+                  ? " layer--grouped"
+                  : ""
               }`}
               onClick={() => onSelect(layer.id)}
             >
               {groups.map((group, index) =>
                 group.members[group.members.length - 1] === layer.id ? (
-                  <div className="layer__group" key={group.name} onClick={(event) => event.stopPropagation()}>
+                  <div
+                    className="layer__group"
+                    key={group.name}
+                    onClick={(event) => event.stopPropagation()}
+                  >
                     <input
                       type="checkbox"
                       className="layer__eye"
                       checked={group.members.every(
-                        (id) => layers.find((l) => l.id === id)?.visible ?? true,
+                        (id) =>
+                          layers.find((l) => l.id === id)?.visible ?? true,
                       )}
                       disabled={disabled}
                       aria-label={`Show or hide group ${group.name}`}
-                      onChange={(event) => onGroupVisible(index, event.target.checked)}
+                      onChange={(event) =>
+                        onGroupVisible(index, event.target.checked)
+                      }
                     />
                     <span className="layer__name">📁 {group.name}</span>
                     <button
@@ -139,7 +211,9 @@ export default function LayerPanel({
                 disabled={disabled}
                 aria-label={`${layer.visible ? "Hide" : "Show"} ${layer.name}`}
                 onClick={(event) => event.stopPropagation()}
-                onChange={(event) => onToggleVisible(layer.id, event.target.checked)}
+                onChange={(event) =>
+                  onToggleVisible(layer.id, event.target.checked)
+                }
               />
               <input
                 type="checkbox"
@@ -147,9 +221,13 @@ export default function LayerPanel({
                 checked={layer.locked}
                 disabled={disabled}
                 aria-label={`${layer.locked ? "Unlock" : "Lock"} ${layer.name}`}
-                title={layer.locked ? "Locked (paint/erase blocked)" : "Not locked"}
+                title={
+                  layer.locked ? "Locked (paint/erase blocked)" : "Not locked"
+                }
                 onClick={(event) => event.stopPropagation()}
-                onChange={(event) => onToggleLocked(layer.id, event.target.checked)}
+                onChange={(event) =>
+                  onToggleLocked(layer.id, event.target.checked)
+                }
               />
               <input
                 type="checkbox"
@@ -157,9 +235,15 @@ export default function LayerPanel({
                 checked={layer.linked}
                 disabled={disabled}
                 aria-label={`${layer.linked ? "Unlink" : "Link"} ${layer.name}`}
-                title={layer.linked ? "Linked: moves with the other linked layers" : "Not linked"}
+                title={
+                  layer.linked
+                    ? "Linked: moves with the other linked layers"
+                    : "Not linked"
+                }
                 onClick={(event) => event.stopPropagation()}
-                onChange={(event) => onToggleLinked(layer.id, event.target.checked)}
+                onChange={(event) =>
+                  onToggleLinked(layer.id, event.target.checked)
+                }
               />
               <input
                 type="checkbox"
@@ -173,7 +257,9 @@ export default function LayerPanel({
                     : "Not clipped to the layer below"
                 }
                 onClick={(event) => event.stopPropagation()}
-                onChange={(event) => onToggleClipped(layer.id, event.target.checked)}
+                onChange={(event) =>
+                  onToggleClipped(layer.id, event.target.checked)
+                }
               />
               <span className="layer__name" title={layer.name}>
                 {layer.name}
@@ -184,37 +270,54 @@ export default function LayerPanel({
                   </span>
                 )}
                 {layer.adjustment && (
-                  <span className="layer__meta" title={`Adjustment layer: ${layer.adjustment.kind}`}>
+                  <span
+                    className="layer__meta"
+                    title={`Adjustment layer: ${layer.adjustment.kind}`}
+                  >
                     {" "}
                     ◐
                   </span>
                 )}
                 {layer.fill && (
-                  <span className="layer__meta" title={`Fill layer: ${layer.fill.kind}`}>
+                  <span
+                    className="layer__meta"
+                    title={`Fill layer: ${layer.fill.kind}`}
+                  >
                     {" "}
                     ▨
                   </span>
                 )}
                 {layer.text && (
-                  <span className="layer__meta" title={`Text layer: ${layer.text.text}`}>
+                  <span
+                    className="layer__meta"
+                    title={`Text layer: ${layer.text.text}`}
+                  >
                     {" "}
                     T
                   </span>
                 )}
                 {layer.shape && (
-                  <span className="layer__meta" title={`Shape layer: ${layer.shape.spec.kind}`}>
+                  <span
+                    className="layer__meta"
+                    title={`Shape layer: ${layer.shape.spec.kind}`}
+                  >
                     {" "}
                     ◇
                   </span>
                 )}
                 {layer.smart && (
-                  <span className="layer__meta" title="Smart object: transforms re-render from its embedded source">
+                  <span
+                    className="layer__meta"
+                    title="Smart object: transforms re-render from its embedded source"
+                  >
                     {" "}
                     ▣
                   </span>
                 )}
               </span>
-              <span className="layer__meta">{Math.round(shownOpacity(layer) * 100)}%</span>
+              <span className="layer__meta">
+                {Math.round(shownOpacity(layer) * 100)}%
+              </span>
             </li>
           ))}
         </ul>
@@ -223,7 +326,9 @@ export default function LayerPanel({
       {layers.length >= 2 && (
         <button
           className="button button--quiet"
-          disabled={disabled || layers.filter((layer) => layer.visible).length < 2}
+          disabled={
+            disabled || layers.filter((layer) => layer.visible).length < 2
+          }
           onClick={onMergeVisible}
           title="Merge every visible layer into one"
         >
@@ -247,7 +352,9 @@ export default function LayerPanel({
           <label className="control">
             <span className="control__label">
               Opacity
-              <span className="control__value">{Math.round(shownOpacity(selected) * 100)}%</span>
+              <span className="control__value">
+                {Math.round(shownOpacity(selected) * 100)}%
+              </span>
             </span>
             {/* Deliberately not disabled while busy: a drag fires a command per
                 step, and disabling the input mid-drag cancels the drag. Stale
@@ -270,12 +377,62 @@ export default function LayerPanel({
             />
           </label>
 
+          {selected.hasMask && (
+            <>
+              <label className="control">
+                <span className="control__label">
+                  Mask Density
+                  <span className="control__value">
+                    {Math.round(shownMaskDensity(selected) * 100)}%
+                  </span>
+                </span>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  step={1}
+                  value={Math.round(shownMaskDensity(selected) * 100)}
+                  onPointerDown={onMaskDensityDragStart}
+                  onChange={(event) => {
+                    const next = Number(event.target.value) / 100;
+                    setDraftMaskDensity(next);
+                    onMaskDensity(selected.id, next);
+                  }}
+                />
+              </label>
+
+              <label className="control">
+                <span className="control__label">
+                  Mask Feather
+                  <span className="control__value">
+                    {shownMaskFeather(selected)}px
+                  </span>
+                </span>
+                <input
+                  type="range"
+                  min={0}
+                  max={250}
+                  step={1}
+                  value={shownMaskFeather(selected)}
+                  onPointerDown={onMaskFeatherDragStart}
+                  onChange={(event) => {
+                    const next = Number(event.target.value);
+                    setDraftMaskFeather(next);
+                    onMaskFeather(selected.id, next);
+                  }}
+                />
+              </label>
+            </>
+          )}
+
           <label className="control">
             <span className="control__label">Blend mode</span>
             <select
               value={selected.blendMode}
               disabled={disabled}
-              onChange={(event) => onBlendMode(selected.id, event.target.value as BlendMode)}
+              onChange={(event) =>
+                onBlendMode(selected.id, event.target.value as BlendMode)
+              }
             >
               {blendModes.map(({ mode, label }) => (
                 <option key={mode} value={mode}>
@@ -288,7 +445,9 @@ export default function LayerPanel({
           <div className="control control--row">
             <button
               className="button button--quiet"
-              disabled={disabled || selected.id === layers[layers.length - 1]?.id}
+              disabled={
+                disabled || selected.id === layers[layers.length - 1]?.id
+              }
               onClick={() => onMove(selected.id, "up")}
             >
               Move up

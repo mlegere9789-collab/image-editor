@@ -34,6 +34,10 @@ export type LayerView = {
   clipped: boolean;
   /** Whether the layer carries a layer mask. */
   hasMask: boolean;
+  /** Properties panel's Mask Density, 0..=1; meaningful only when hasMask. */
+  maskDensity: number;
+  /** Properties panel's Mask Feather radius in pixels; meaningful only when hasMask. */
+  maskFeather: number;
   /** The live adjustment of an adjustment layer; `null` for a pixel layer. */
   adjustment: Adjustment | null;
   /** The recipe of a fill layer; `null` for any other layer. */

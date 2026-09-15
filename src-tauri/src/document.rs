@@ -498,6 +498,17 @@ pub struct Layer {
     /// layer's alpha at composite time (`255` shows, `0` hides), or `None`
     /// for an unmasked layer.
     pub mask: Option<Vec<u8>>,
+    /// Properties panel's Mask Density: `0.0..=1.0`, how much the mask's own
+    /// darkening reaches the layer — 1.0 is the mask applied exactly as
+    /// stored, 0.0 makes it invisible (the layer shows through as if
+    /// unmasked). Meaningless without a mask; kept at its default `1.0`
+    /// whenever `mask` is `None`.
+    pub mask_density: f32,
+    /// Properties panel's Mask Feather: a box-blur radius in pixels run
+    /// live over the mask before Density and compositing use it, softening
+    /// its edge without touching the stored mask bytes. `0` is the mask
+    /// exactly as stored; meaningless without a mask.
+    pub mask_feather: u32,
     /// An adjustment layer: instead of its own pixels, this adjustment is
     /// applied live to everything composited beneath it, at the layer's
     /// opacity, through its mask and clipping like any other layer.
@@ -534,6 +545,12 @@ pub struct LayerView {
     pub clipped: bool,
     /// Whether the layer carries a layer mask.
     pub has_mask: bool,
+    /// Properties panel's Mask Density, `0.0..=1.0`; meaningful only when
+    /// `has_mask`.
+    pub mask_density: f32,
+    /// Properties panel's Mask Feather radius in pixels; meaningful only
+    /// when `has_mask`.
+    pub mask_feather: u32,
     /// The live adjustment of an adjustment layer; `None` for a pixel layer.
     pub adjustment: Option<Adjustment>,
     /// The recipe of a fill layer; `None` for any other layer.
@@ -558,6 +575,8 @@ impl Layer {
             linked: self.linked,
             clipped: self.clipped,
             has_mask: self.mask.is_some(),
+            mask_density: self.mask_density,
+            mask_feather: self.mask_feather,
             adjustment: self.adjustment,
             fill: self.fill,
             text: self.text.clone(),
@@ -10099,6 +10118,8 @@ impl Document {
             linked: false,
             clipped: false,
             mask: None,
+            mask_density: 1.0,
+            mask_feather: 0,
             adjustment: None,
             fill: None,
             text: None,
@@ -10141,6 +10162,8 @@ impl Document {
             linked: false,
             clipped: false,
             mask: None,
+            mask_density: 1.0,
+            mask_feather: 0,
             adjustment: None,
             fill: None,
             text: None,
@@ -10840,6 +10863,8 @@ impl Document {
             linked: false,
             clipped: false,
             mask: None,
+            mask_density: 1.0,
+            mask_feather: 0,
             adjustment: None,
             fill: None,
             text: None,
@@ -12653,7 +12678,10 @@ impl Document {
                     .collect()
             }
         };
-        self.layer_mut(id)?.mask = Some(mask);
+        let layer = self.layer_mut(id)?;
+        layer.mask = Some(mask);
+        layer.mask_density = 1.0;
+        layer.mask_feather = 0;
         Ok(())
     }
 
@@ -12698,7 +12726,10 @@ impl Document {
         if !mask.contains(&inside) {
             return Err("That path encloses no pixel.".to_string());
         }
-        self.layer_mut(id)?.mask = Some(mask);
+        let layer = self.layer_mut(id)?;
+        layer.mask = Some(mask);
+        layer.mask_density = 1.0;
+        layer.mask_feather = 0;
         Ok(())
     }
 
@@ -12708,7 +12739,43 @@ impl Document {
         if mask.len() != self.width as usize * self.height as usize {
             return Err("A layer mask must have one byte per document pixel.".to_string());
         }
-        self.layer_mut(id)?.mask = Some(mask);
+        let layer = self.layer_mut(id)?;
+        layer.mask = Some(mask);
+        layer.mask_density = 1.0;
+        layer.mask_feather = 0;
+        Ok(())
+    }
+
+    /// Properties panel's Mask Density: scales how much layer `id`'s mask
+    /// darkens the layer, `0.0` (invisible) through `1.0` (the mask applied
+    /// exactly as stored, the default a fresh mask starts at). Errors when
+    /// the layer has no mask or `density` is outside `0.0..=1.0`.
+    pub fn set_mask_density(&mut self, id: LayerId, density: f32) -> Result<(), String> {
+        if !(0.0..=1.0).contains(&density) {
+            return Err("Mask Density must be between 0 and 100 percent.".to_string());
+        }
+        let layer = self.layer_mut(id)?;
+        if layer.mask.is_none() {
+            return Err("That layer has no layer mask.".to_string());
+        }
+        layer.mask_density = density;
+        Ok(())
+    }
+
+    /// Properties panel's Mask Feather: a live box-blur radius in pixels
+    /// run over layer `id`'s mask before it reaches the composite, `0`
+    /// (the mask exactly as stored, the default a fresh mask starts at)
+    /// through `250`, [`Self::feather_selection`]'s own cap. Errors when
+    /// the layer has no mask or `radius` exceeds it.
+    pub fn set_mask_feather(&mut self, id: LayerId, radius: u32) -> Result<(), String> {
+        if radius > 250 {
+            return Err("Mask Feather must be between 0 and 250 pixels.".to_string());
+        }
+        let layer = self.layer_mut(id)?;
+        if layer.mask.is_none() {
+            return Err("That layer has no layer mask.".to_string());
+        }
+        layer.mask_feather = radius;
         Ok(())
     }
 
@@ -12734,8 +12801,11 @@ impl Document {
             layer.mask = Some(mask);
             return Err(format!("Layer \"{}\" is locked.", layer.name));
         }
-        for (px, &m) in layer.pixels.chunks_exact_mut(CHANNELS).zip(mask.iter()) {
-            px[3] = to_byte(to_unit(px[3]) * to_unit(m));
+        let (density, feather, width) = (layer.mask_density, layer.mask_feather, everything.x1);
+        for (idx, px) in layer.pixels.chunks_exact_mut(CHANNELS).enumerate() {
+            let (x, y) = (idx as u32 % width, idx as u32 / width);
+            let m = crate::composite::effective_mask_value(&mask, width, x, y, density, feather);
+            px[3] = to_byte(to_unit(px[3]) * m);
         }
         Ok(Some(everything))
     }
@@ -14083,6 +14153,8 @@ impl Document {
             linked: false,
             clipped: false,
             mask: None,
+            mask_density: 1.0,
+            mask_feather: 0,
             adjustment: None,
             fill: None,
             text: None,
@@ -19126,6 +19198,8 @@ impl Document {
             linked: false,
             clipped: false,
             mask: None,
+            mask_density: 1.0,
+            mask_feather: 0,
             adjustment: None,
             fill: None,
             text: None,
@@ -19171,6 +19245,8 @@ impl Document {
             linked: false,
             clipped: false,
             mask: None,
+            mask_density: 1.0,
+            mask_feather: 0,
             adjustment: None,
             fill: None,
             text: None,
@@ -19235,6 +19311,8 @@ impl Document {
             linked: false,
             clipped: false,
             mask: None,
+            mask_density: 1.0,
+            mask_feather: 0,
             adjustment: None,
             fill: None,
             text: None,
@@ -19394,6 +19472,8 @@ impl Document {
             linked: false,
             clipped: false,
             mask: None,
+            mask_density: 1.0,
+            mask_feather: 0,
             adjustment: None,
             fill: None,
             text: None,
@@ -42521,6 +42601,65 @@ mod tests {
         doc.set_opacity(id, 0.5).unwrap();
         assert_eq!(composite_at(&doc, 0), [0, 255, 0, 32]);
         assert!(doc.set_layer_mask(id, vec![1, 2, 3]).is_err());
+    }
+
+    #[test]
+    fn mask_density_blends_a_fully_hiding_mask_toward_fully_visible() {
+        // Python f32 model: mask byte 0 (fully hides) at Density 60% →
+        // effective mask 0.4 (1 − 0.6·(1 − 0)); 255 × 1.0 × 0.4 → 102,
+        // 200/255 × 0.4 → 80.
+        let mut doc = Document::new(2, 1).unwrap();
+        let id = doc
+            .add_layer("l", &[0, 255, 0, 255, 0, 255, 0, 200], 2, 1)
+            .unwrap();
+        doc.set_layer_mask(id, vec![0, 0]).unwrap();
+        assert_eq!(composite_at(&doc, 0), [0, 0, 0, 0]);
+        doc.set_mask_density(id, 0.6).unwrap();
+        assert_eq!(composite_at(&doc, 0), [0, 255, 0, 102]);
+        assert_eq!(composite_at(&doc, 1), [0, 255, 0, 80]);
+        // A fresh mask (`set_layer_mask` again) resets Density back to 100%.
+        doc.set_layer_mask(id, vec![0, 0]).unwrap();
+        assert_eq!(composite_at(&doc, 0), [0, 0, 0, 0]);
+        assert!(doc.set_mask_density(id, 1.5).is_err());
+        assert!(doc.set_mask_density(id, -0.1).is_err());
+        doc.remove_layer_mask(id, false).unwrap();
+        assert!(doc.set_mask_density(id, 0.5).is_err());
+    }
+
+    #[test]
+    fn mask_feather_blurs_it_with_a_clamp_to_edge_box_blur() {
+        // A single visible pixel (mask 255) at x=2 of a 5×1 mask, radius 1:
+        // the interior sample at x=2 averages 0,255,0 → 85 (255/3, exact);
+        // x=0's neighbourhood — clamped twice to x=0, once to x=1 — never
+        // reaches the 255 at all, so it (and x=4, symmetric) stays 0.
+        let mut doc = Document::new(5, 1).unwrap();
+        let id = doc
+            .add_layer("l", &solid(5, 1, [0, 255, 0, 255]), 5, 1)
+            .unwrap();
+        doc.set_layer_mask(id, vec![0, 0, 255, 0, 0]).unwrap();
+        doc.set_mask_feather(id, 1).unwrap();
+        assert_eq!(composite_at(&doc, 0)[3], 0);
+        assert_eq!(composite_at(&doc, 2)[3], 85);
+        assert_eq!(composite_at(&doc, 4)[3], 0);
+        assert!(doc.set_mask_feather(id, 251).is_err());
+        doc.remove_layer_mask(id, false).unwrap();
+        assert!(doc.set_mask_feather(id, 1).is_err());
+    }
+
+    #[test]
+    fn applying_a_mask_bakes_density_and_feather_not_just_the_raw_byte() {
+        // Python f32 model: mask [0, 255] at Density 50% → effective
+        // 0.5 at x=0 (1 − 0.5·(1 − 0)), 1.0 at x=1 (raw already opaque);
+        // baked alpha is 255 × that effective fraction, not the raw byte.
+        let mut doc = Document::new(2, 1).unwrap();
+        let id = doc
+            .add_layer("l", &solid(2, 1, [0, 255, 0, 255]), 2, 1)
+            .unwrap();
+        doc.set_layer_mask(id, vec![0, 255]).unwrap();
+        doc.set_mask_density(id, 0.5).unwrap();
+        doc.remove_layer_mask(id, true).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [0, 255, 0, 128]);
+        assert_eq!(pixel(&doc, id, 1, 0), [0, 255, 0, 255]);
     }
 
     #[test]

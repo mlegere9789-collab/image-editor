@@ -23651,6 +23651,77 @@ warnings`/`test` and `npm run build`/`test`/`tsc --noEmit` all clean.
 Tests: 1918 Rust (1917 → 1918), 33 frontend (unchanged — one dropdown
 added to the Apply Image dialog, no new test file needed).
 
+## Phase 405 — Layer Mask's Density and Feather
+
+LAYER MASK's own "painting directly on the mask and mask density/feather
+are documented scope cuts" line was next in `docs/PLAN_TO_100.md`'s Phase D
+backlog. Painting on the mask needs a real second paint target the canvas
+doesn't have yet (this project's brush strokes always land on a layer's own
+pixels) and stays cut; Density and Feather are two scalar Properties-panel
+controls over an *existing* mask, with no new interaction model needed, so
+this phase reopens just that half.
+
+Both are live, non-destructive — the stored mask bytes never change,
+matching Photoshop's own Properties panel, where dragging either slider
+back reveals the original mask untouched. `Layer` gained `mask_density:
+f32` (`0.0..=1.0`, default `1.0`) and `mask_feather: u32` (a pixel radius,
+default `0`), reset back to their defaults by every command that installs a
+fresh mask (`add_layer_mask`, `add_vector_mask`, `set_layer_mask`) so a
+later mask never inherits a stale slider setting from one that came before
+it on the same layer. A new shared `composite::effective_mask_value`
+computes the byte `composite_layers_pixel` actually uses at a pixel: Feather
+first — a box blur of the stored mask over a `(2 · radius + 1)²`
+neighbourhood, clamped to the mask's own edges exactly the way
+`document::box_blur_at`'s brush/filter sampling already clamps — then
+Density, which blends that (possibly blurred) value toward fully visible by
+`1.0 − mask_density`. At the default `(1.0, 0)` every existing layer already
+has, Density's blend is the identity and Feather's radius-0 blur reads the
+raw byte directly, so `effective_mask_value` collapses to the exact
+`to_unit(mask[…])` expression it replaced — byte-for-byte the same
+compositing every prior test already locks in. Both of `composite_layers_pixel`'s
+mask reads (the plain-layer alpha multiply and the adjustment-layer
+strength multiply) now go through it instead of indexing the mask directly.
+Layer > Layer Mask > Apply (`remove_layer_mask(id, true)`) bakes the same
+effective value, not the raw stored byte, into the layer's alpha — so
+applying a masked-then-feathered-or-thinned layer keeps looking exactly like
+it did on screen, the same "bake what's shown" guarantee Apply already made
+for a plain mask.
+
+Two new `Document` methods, `set_mask_density`/`set_mask_feather`, each
+validate their range (`0.0..=1.0` / `0..=250`, the same cap
+`feather_selection` already uses) and that the layer actually carries a
+mask, erroring "That layer has no layer mask." otherwise — the same message
+`remove_layer_mask` already uses for the same condition. Two Tauri commands
+of the same names, and a Layers panel Properties section: two new sliders,
+Mask Density (a percent, mirroring the existing Opacity slider's own
+draft-value-during-drag handling so the thumb never snaps back mid-drag)
+and Mask Feather (0–250px), both shown only for the selected layer's own
+`hasMask`.
+
+**Verified.** All 70 pre-existing mask-touching tests (Layer Mask, Vector
+Mask, Select and Mask, Liquify's own freeze mask, Clipping Mask, and more)
+pass unmodified, confirming the refactor changed nothing at the
+`(1.0, 0)` default every one of them runs at. Three new hand-computed
+tests: `mask_density_blends_a_fully_hiding_mask_toward_fully_visible` (mask byte 0
+at Density 60% → effective 0.4, so a 255-alpha pixel compositing at 1.0
+opacity reads 102 and a 200-alpha one reads 80 — `1 − 0.6·(1−0) = 0.4`,
+`255×0.4 → 102`, `(200/255)×0.4×255 → 80`; a fresh `set_layer_mask` call
+resets Density back to 1.0; out-of-range Density and Density with no mask
+both error); `mask_feather_blurs_it_with_a_clamp_to_edge_box_blur` (a 5×1
+mask `[0, 0, 255, 0, 0]` at radius 1 — the interior sample at `x=2` averages
+its three neighbours `0, 255, 0 → 85` exactly, `255/3`, while `x=0`'s and
+`x=4`'s own neighbourhoods, clamped twice to the same edge byte, never reach
+the 255 at all and stay `0`; radius over 250 and Feather with no mask both
+error); `applying_a_mask_bakes_density_and_feather_not_just_the_raw_byte`
+(mask `[0, 255]` at Density 50% bakes `128` and `255`, not the raw `0` and
+`255` — proving Apply reads the effective value, not the stored byte).
+`cargo fmt`/`clippy --all-targets -D warnings`/`test` and `npm run
+build`/`test`/`tsc --noEmit` all clean.
+
+Tests: 1921 Rust (1918 → 1921), 33 frontend (unchanged — a Layers-panel
+slider pair needs no new test file, the same shape Opacity's own slider
+already has).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

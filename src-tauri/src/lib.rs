@@ -4897,6 +4897,42 @@ fn add_vector_mask(
     })
 }
 
+/// Properties panel's Mask Density for layer `id`, `0.0..=1.0`.
+#[tauri::command]
+fn set_mask_density(
+    state: State<'_, AppState>,
+    id: LayerId,
+    density: f32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.set_mask_density(id, density)?;
+        Ok(Some(Rect {
+            x0: 0,
+            y0: 0,
+            x1: document.width(),
+            y1: document.height(),
+        }))
+    })
+}
+
+/// Properties panel's Mask Feather radius, in pixels, for layer `id`.
+#[tauri::command]
+fn set_mask_feather(
+    state: State<'_, AppState>,
+    id: LayerId,
+    radius: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.set_mask_feather(id, radius)?;
+        Ok(Some(Rect {
+            x0: 0,
+            y0: 0,
+            x1: document.width(),
+            y1: document.height(),
+        }))
+    })
+}
+
 /// Layer > New Adjustment Layer: a live `adjustment` over everything
 /// beneath it, as a new top layer.
 #[tauri::command]
@@ -8166,6 +8202,8 @@ pub fn run() {
             select_person_component,
             set_fill,
             add_vector_mask,
+            set_mask_density,
+            set_mask_feather,
             remove_layer_mask,
             rasterize_layer,
             flip_layer_horizontal,

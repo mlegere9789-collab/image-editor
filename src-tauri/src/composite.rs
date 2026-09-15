@@ -192,6 +192,45 @@ pub fn composite_pixel(document: &Document, x: u32, y: u32) -> [u8; 4] {
     ]
 }
 
+/// The Properties panel's live Mask Density/Feather applied to `mask`'s
+/// stored byte at `(x, y)`: Feather first, a box blur of radius
+/// `mask_feather` clamped to `mask`'s own edges (the same clamp-to-edge
+/// shape [`crate::document`]'s brush/filter sampling already uses), then
+/// Density, which blends the (possibly feathered) value toward fully
+/// visible by `1.0 - mask_density` — `mask_density` `1.0` leaves it
+/// unchanged, `0.0` makes the mask invisible. `mask` is document-sized
+/// (`width * height` bytes); `height` is recovered from its own length so
+/// callers already holding only `width` (as [`composite_layers_pixel`]
+/// does) don't need to thread a second dimension through.
+pub(crate) fn effective_mask_value(
+    mask: &[u8],
+    width: u32,
+    x: u32,
+    y: u32,
+    mask_density: f32,
+    mask_feather: u32,
+) -> f32 {
+    let width = width as i64;
+    let height = mask.len() as i64 / width;
+    let raw = if mask_feather == 0 {
+        mask[(y as i64 * width + x as i64) as usize]
+    } else {
+        let r = mask_feather as i64;
+        let mut sum = 0u32;
+        let mut n = 0u32;
+        for dy in -r..=r {
+            let sy = (y as i64 + dy).clamp(0, height - 1);
+            for dx in -r..=r {
+                let sx = (x as i64 + dx).clamp(0, width - 1);
+                sum += u32::from(mask[(sy * width + sx) as usize]);
+                n += 1;
+            }
+        }
+        (sum as f32 / n as f32).round() as u8
+    };
+    1.0 - mask_density * (1.0 - to_unit(raw))
+}
+
 /// Composite one pixel `(x, y)` from `layers`, applied in the given
 /// iteration order: non-premultiplied RGBA in `0.0..=1.0`. The single place
 /// the blend math lives, shared by [`flatten`] (every contributing layer),
@@ -211,7 +250,14 @@ fn composite_layers_pixel(layers: &[&Layer], width: u32, x: u32, y: u32) -> [f32
         if let Some(adjustment) = layer.adjustment {
             let mut strength = layer.opacity;
             if let Some(mask) = &layer.mask {
-                strength *= to_unit(mask[base / CHANNELS]);
+                strength *= effective_mask_value(
+                    mask,
+                    width as u32,
+                    x,
+                    y,
+                    layer.mask_density,
+                    layer.mask_feather,
+                );
             }
             if layer.clipped {
                 if let Some(clip_base) = layers[..index].iter().rev().find(|l| !l.clipped) {
@@ -237,7 +283,14 @@ fn composite_layers_pixel(layers: &[&Layer], width: u32, x: u32, y: u32) -> [f32
         let mut source_alpha = to_unit(layer.pixels[base + 3]) * layer.opacity;
         // A layer mask multiplies straight into the alpha.
         if let Some(mask) = &layer.mask {
-            source_alpha *= to_unit(mask[base / CHANNELS]);
+            source_alpha *= effective_mask_value(
+                mask,
+                width as u32,
+                x,
+                y,
+                layer.mask_density,
+                layer.mask_feather,
+            );
         }
         // A clipping mask: a clipped layer shows only where its base — the
         // nearest unclipped layer below it — has pixels, its alpha scaled
