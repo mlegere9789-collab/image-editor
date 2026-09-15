@@ -24,6 +24,19 @@ export const TOP_MENUS = [
 
 export type TopMenu = (typeof TOP_MENUS)[number];
 
+/** Photoshop's own fixed Menu Color palette (Edit > Menus' colour picker). */
+export const MENU_COLORS = [
+  "red",
+  "orange",
+  "yellow",
+  "green",
+  "blue",
+  "violet",
+  "gray",
+] as const;
+
+export type MenuColor = (typeof MENU_COLORS)[number];
+
 /** Toolbar titles that start at a Photoshop submenu rather than a menu. */
 const SUBMENU_ROOTS: Record<string, string[]> = {
   "Filter Gallery": ["Filter", "Filter Gallery"],
@@ -55,6 +68,8 @@ export type MenuCommand = {
   disabled: boolean;
   checked: boolean | null;
   run: () => void;
+  /** Edit > Menus' own Menu Color, or `null` for the plain, uncoloured row. */
+  color: MenuColor | null;
 };
 
 export type MenuGroup = {
@@ -303,11 +318,14 @@ function groupAt(items: MenuItem[], path: string[], depth: number): MenuItem[] {
  * skipped, as are commands whose key (see `commandKey`) is in `hidden`
  * — Edit > Menus — and any submenu that leaves empty. Every top-level
  * menu is present, empty or not, so the bar always reads File … Help,
- * and each menu leads with Photoshop's own order (`MENU_ORDER`).
+ * and each menu leads with Photoshop's own order (`MENU_ORDER`). `colors`
+ * — Edit > Menus' own Menu Color — labels each surviving command with
+ * whichever colour its own key was given, or `null` for none.
  */
 export function buildMenuTree(
   entries: MenuEntry[],
   hidden: ReadonlySet<string> = new Set(),
+  colors: ReadonlyMap<string, MenuColor> = new Map(),
 ): MenuGroup[] {
   const menus: MenuGroup[] = TOP_MENUS.map((label) => ({
     kind: "group",
@@ -318,7 +336,8 @@ export function buildMenuTree(
   for (const entry of entries) {
     const path = menuPath(entry.title);
     if (path === null) continue;
-    if (hidden.has(commandKey({ path, label: entry.label }))) continue;
+    const key = commandKey({ path, label: entry.label });
+    if (hidden.has(key)) continue;
     const menu = menus.find((candidate) => candidate.label === path[0]);
     if (!menu) continue;
     const items = groupAt(menu.items, path, 1);
@@ -331,6 +350,7 @@ export function buildMenuTree(
       disabled: entry.disabled,
       checked: entry.checked ?? null,
       run: entry.run,
+      color: colors.get(key) ?? null,
     });
   }
   for (const menu of menus) {

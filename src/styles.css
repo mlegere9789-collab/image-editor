@@ -1640,6 +1640,41 @@ body {
   flex: 1;
 }
 
+.menubar__color-swatch {
+  width: 10px;
+  height: 10px;
+  flex: none;
+  border-radius: 2px;
+}
+
+.menubar__color-swatch--red {
+  background: #e0463f;
+}
+
+.menubar__color-swatch--orange {
+  background: #e8912a;
+}
+
+.menubar__color-swatch--yellow {
+  background: #e0cf3a;
+}
+
+.menubar__color-swatch--green {
+  background: #4caf6b;
+}
+
+.menubar__color-swatch--blue {
+  background: #4a90d9;
+}
+
+.menubar__color-swatch--violet {
+  background: #9b6cc7;
+}
+
+.menubar__color-swatch--gray {
+  background: #9a9a9a;
+}
+
 .menubar__arrow {
   color: var(--muted);
 }

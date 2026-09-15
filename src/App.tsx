@@ -28,7 +28,13 @@ import {
   TIP_TOOLS,
 } from "./optionsBar";
 import { markTourSeen, tourSeen } from "./tour";
-import { buildMenuTree, commandKey, flattenMenuTree } from "./menuBar";
+import {
+  buildMenuTree,
+  commandKey,
+  flattenMenuTree,
+  MENU_COLORS,
+  type MenuColor,
+} from "./menuBar";
 import {
   AUTO_CORRECTION_ALGORITHM_LABELS,
   planAutoColorCorrection,
@@ -229,6 +235,7 @@ const PEOPLE_OPTION = PEOPLE_TOOLS.join(" ");
 const KEY_BINDINGS_STORAGE_KEY = "legelabs.keyBindings";
 const WORKSPACES_STORAGE_KEY = "legelabs.workspaces";
 const HIDDEN_MENU_COMMANDS_STORAGE_KEY = "legelabs.hiddenMenuCommands";
+const MENU_COMMAND_COLORS_STORAGE_KEY = "legelabs.menuCommandColors";
 const LOCK_WORKSPACE_STORAGE_KEY = "legelabs.lockWorkspace";
 // Generative Fill and Cloud Documents: a user-configured provider endpoint
 // and credential for each, held only in this browser's own localStorage --
@@ -3182,6 +3189,48 @@ export default function App() {
     setHiddenMenuCommands(new Set());
     try {
       localStorage.removeItem(HIDDEN_MENU_COMMANDS_STORAGE_KEY);
+    } catch {
+      // ignore
+    }
+  }, [lockWorkspace]);
+  // Edit > Menus (Menu Color): each coloured command's own Photoshop Menu
+  // Color, kept in the browser like hiddenMenuCommands above by the same
+  // per-command key. "none" removes a command's own entry entirely.
+  const [menuCommandColors, setMenuCommandColors] = useState<
+    Record<string, MenuColor>
+  >(() => {
+    try {
+      const saved = localStorage.getItem(MENU_COMMAND_COLORS_STORAGE_KEY);
+      return saved ? (JSON.parse(saved) as Record<string, MenuColor>) : {};
+    } catch {
+      return {};
+    }
+  });
+  const setMenuCommandColor = useCallback(
+    (key: string, color: MenuColor | "none") => {
+      if (lockWorkspace) return;
+      setMenuCommandColors((previous) => {
+        const next = { ...previous };
+        if (color === "none") delete next[key];
+        else next[key] = color;
+        try {
+          localStorage.setItem(
+            MENU_COMMAND_COLORS_STORAGE_KEY,
+            JSON.stringify(next),
+          );
+        } catch {
+          // ignore
+        }
+        return next;
+      });
+    },
+    [lockWorkspace],
+  );
+  const resetMenuCommandColors = useCallback(() => {
+    if (lockWorkspace) return;
+    setMenuCommandColors({});
+    try {
+      localStorage.removeItem(MENU_COMMAND_COLORS_STORAGE_KEY);
     } catch {
       // ignore
     }
@@ -12401,7 +12450,11 @@ export default function App() {
           .map((id) => `[data-tool="${id}"]{display:none!important}`)
           .join("") + optionsRule(tool)}
       </style>
-      <MenuBar entries={menuEntries} hidden={hiddenMenuCommands} />
+      <MenuBar
+        entries={menuEntries}
+        hidden={hiddenMenuCommands}
+        colors={new Map(Object.entries(menuCommandColors))}
+      />
       <header
         className={`toolbar${compactToolbar ? " toolbar--compact" : ""}${showColorSettings ? "" : " toolbar--no-color"}`}
       >
@@ -19560,9 +19613,10 @@ export default function App() {
             <h2 className="modal__heading">Edit &gt; Menus</h2>
             <p className="modal__hint">
               Uncheck a command to hide it from the menu bar; a submenu with
-              nothing left disappears with it. Hidden commands keep their
-              toolbar buttons and shortcuts. A browser preference, not document
-              data. Colour-coding menu commands is a documented scope cut.
+              nothing left disappears with it. Give a command a Menu Color to
+              highlight it in the menu bar, Photoshop's own fixed palette of
+              seven. Hidden commands keep their toolbar buttons and
+              shortcuts. A browser preference, not document data.
             </p>
             <div className="toolbar-customize__list">
               {flattenMenuTree(
@@ -19581,6 +19635,24 @@ export default function App() {
                       disabled={lockWorkspace}
                     />
                     <span className="control__label">{key}</span>
+                    <select
+                      aria-label={`${key} Menu Color`}
+                      value={menuCommandColors[key] ?? "none"}
+                      onChange={(event) =>
+                        setMenuCommandColor(
+                          key,
+                          event.target.value as MenuColor | "none",
+                        )
+                      }
+                      disabled={lockWorkspace}
+                    >
+                      <option value="none">No Color</option>
+                      {MENU_COLORS.map((color) => (
+                        <option key={color} value={color}>
+                          {color[0].toUpperCase() + color.slice(1)}
+                        </option>
+                      ))}
+                    </select>
                   </label>
                 );
               })}
@@ -19592,6 +19664,15 @@ export default function App() {
                 disabled={hiddenMenuCommands.size === 0 || lockWorkspace}
               >
                 Show All
+              </button>
+              <button
+                className="button button--quiet"
+                onClick={resetMenuCommandColors}
+                disabled={
+                  Object.keys(menuCommandColors).length === 0 || lockWorkspace
+                }
+              >
+                Clear Colors
               </button>
               <button
                 className="button"

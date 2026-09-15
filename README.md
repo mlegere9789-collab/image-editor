@@ -25191,6 +25191,47 @@ existing 1970/1970 Rust suite is unaffected.
 
 Tests: 1970 Rust (unchanged), 44 frontend (39 → 44: five new tests).
 
+## Phase 432 — Custom Menus' Menu Color
+
+Resolved the Custom Menus row's own documented scope cut, "Colour-coding
+menu commands." Photoshop's Menu Color is genuinely simple: a fixed
+seven-colour palette (Red, Orange, Yellow, Green, Blue, Violet, Gray),
+one optional colour per command, shown as a coloured highlight beside
+that command wherever it appears in the menu bar. Nothing about it
+depends on any of the architecturally heavier scope cuts still open
+elsewhere in the checklist, which made it a clean, well-bounded next cut
+to close.
+
+`menuBar.ts` gained `MENU_COLORS`/`MenuColor` (the seven names) and a
+`color: MenuColor | null` field on `MenuCommand`; `buildMenuTree` takes
+a new third `colors: ReadonlyMap<string, MenuColor>` parameter (default
+empty), keyed the same way `hidden` already is by each command's own
+`commandKey`, and stamps every surviving command with whichever colour
+its key maps to, or `null` for none — the exact same shape `hidden`
+already established, just carrying a value instead of only presence.
+`App.tsx` keeps a new `menuCommandColors` browser preference
+(`legelabs.menuCommandColors`, a plain `Record<string, MenuColor>` in
+`localStorage`, alongside `hiddenMenuCommands`) and a `setMenuCommandColor`
+setter; the Customize Menus dialog gained a `<select>` next to every
+command's existing checkbox — "No Color" plus the seven names — and a
+"Clear Colors" button beside the existing "Show All." `MenuBar.tsx`
+takes the new `colors` map as a prop, threads it into `buildMenuTree`
+and into its own rebuild signature (so a colour change repaints an open
+menu the same way a visibility change already does), and renders a
+small coloured square beside any command whose `color` isn't `null`,
+via seven new `.menubar__color-swatch--<name>` rules in `styles.css`.
+
+Two new hand-computed tests in `menuBar.test.ts`: `buildMenuTree` given
+two coloured keys out of three commands stamps exactly those two with
+their own colour and leaves the third `null`; given no `colors` argument
+at all, every command comes back `null`. All of `menuBar.test.ts`'s
+existing tests — none of which ever asserted a whole `MenuCommand` by
+`deepEqual`, only individual fields — pass unmodified, confirming the
+new field is additive. `npx tsc --noEmit`, `npm run build`, and
+`npm test` all clean; no Rust file touched.
+
+Tests: 1970 Rust (unchanged), 46 frontend (44 → 46: two new tests).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

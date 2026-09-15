@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   buildMenuTree,
   menuSignature,
+  type MenuColor,
   type MenuEntry,
   type MenuGroup,
   type MenuItem,
@@ -34,6 +35,8 @@ type Props = {
   entries: () => MenuEntry[];
   /** Edit > Menus: the `commandKey`s left out of the menus. */
   hidden: ReadonlySet<string>;
+  /** Edit > Menus: each coloured command's own Menu Color, by `commandKey`. */
+  colors: ReadonlyMap<string, MenuColor>;
 };
 
 const ITEM_SELECTOR = '[role="menuitem"]:not(:disabled), [role="menuitemcheckbox"]:not(:disabled)';
@@ -56,7 +59,7 @@ function siblingsOf(element: HTMLElement): HTMLElement[] {
  * click a command to run it. Keyboard: Left/Right switch menus, Up/Down
  * move, Right opens a submenu, Left closes it, Enter runs, Escape closes.
  */
-export default function MenuBar({ entries, hidden }: Props) {
+export default function MenuBar({ entries, hidden, colors }: Props) {
   const [open, setOpen] = useState<number | null>(null);
   const [tree, setTree] = useState<MenuGroup[]>(() => buildMenuTree([]));
   // Where each open submenu sits, in viewport pixels: submenus are
@@ -82,10 +85,18 @@ export default function MenuBar({ entries, hidden }: Props) {
   useEffect(() => {
     if (open === null) return;
     const current = entries();
-    const next = menuSignature(current) + "\u0002" + [...hidden].join("\u0001");
+    const colorSignature = [...colors]
+      .map(([key, color]) => key + "\u0004" + color)
+      .join("\u0001");
+    const next =
+      menuSignature(current) +
+      "\u0002" +
+      [...hidden].join("\u0001") +
+      "\u0003" +
+      colorSignature;
     if (next === signature.current) return;
     signature.current = next;
-    setTree(buildMenuTree(current, hidden));
+    setTree(buildMenuTree(current, hidden, colors));
   });
 
   const close = useCallback(() => {
@@ -263,6 +274,12 @@ export default function MenuBar({ entries, hidden }: Props) {
             <span className="menubar__check" aria-hidden="true">
               {item.checked ? "✓" : ""}
             </span>
+            {item.color && (
+              <span
+                className={`menubar__color-swatch menubar__color-swatch--${item.color}`}
+                aria-hidden="true"
+              />
+            )}
             <span className="menubar__label">{item.label}</span>
             {item.shortcut && <kbd className="menubar__shortcut">{item.shortcut}</kbd>}
           </button>

@@ -7,6 +7,7 @@ import {
   menuHint,
   menuPath,
   menuShortcut,
+  type MenuColor,
   type MenuEntry,
 } from "./menuBar.ts";
 
@@ -188,5 +189,34 @@ test("buildMenuTree orders Image > Adjustments the way Photoshop does and append
   assert.deepEqual(
     adjustments.items.map((item) => item.label),
     ["Brightness/Contrast…", "Levels…", "Threshold…", "Equalize"],
+  );
+});
+
+test("buildMenuTree labels each command with its own Menu Color, and leaves the rest uncoloured", () => {
+  const entries = [
+    entry("Rotate…", "Edit > Transform > Rotate (any angle)"),
+    entry("Fill…", "Edit > Fill"),
+    entry("Skew…", "Edit > Transform > Skew"),
+  ];
+  const colors = new Map<string, MenuColor>([
+    ["Edit > Transform > Rotate…", "red"],
+    ["Edit > Fill…", "blue"],
+  ]);
+  const tree = buildMenuTree(entries, new Set(), colors);
+  assert.deepEqual(
+    flattenMenuTree(tree).map((command) => [commandKey(command), command.color]),
+    [
+      ["Edit > Fill…", "blue"],
+      ["Edit > Transform > Rotate…", "red"],
+      ["Edit > Transform > Skew…", null],
+    ],
+  );
+});
+
+test("buildMenuTree leaves every command uncoloured when no colours are given", () => {
+  const tree = buildMenuTree([entry("Fill…", "Edit > Fill")]);
+  assert.deepEqual(
+    flattenMenuTree(tree).map((command) => command.color),
+    [null],
   );
 });
