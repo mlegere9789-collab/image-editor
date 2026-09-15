@@ -194,7 +194,13 @@ export type Adjustment =
   | { kind: "invert" }
   | { kind: "brightnessContrast"; brightness: number; contrast: number }
   | { kind: "threshold"; level: number }
-  | { kind: "posterize"; levels: number };
+  | { kind: "posterize"; levels: number }
+  | {
+      kind: "hueSaturation";
+      hue: number;
+      saturation: number;
+      lightness: number;
+    };
 
 /** Mirrors `NeuralFilterKind` in src-tauri/src/document.rs (serde
  * camelCase, fieldless variants so each serializes as a bare string) — a

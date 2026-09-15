@@ -759,16 +759,28 @@ pub enum MaskSource {
     HideSelection,
 }
 
-/// What an adjustment layer does to everything beneath it — the four
-/// Image > Adjustments this project can express as a pure per-pixel
-/// function, kept live on the layer instead of baked into pixels.
+/// What an adjustment layer does to everything beneath it — the Image >
+/// Adjustments this project can express as a pure per-pixel function, kept
+/// live on the layer instead of baked into pixels.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Adjustment {
     Invert,
-    BrightnessContrast { brightness: i32, contrast: i32 },
-    Threshold { level: u8 },
-    Posterize { levels: u8 },
+    BrightnessContrast {
+        brightness: i32,
+        contrast: i32,
+    },
+    Threshold {
+        level: u8,
+    },
+    Posterize {
+        levels: u8,
+    },
+    HueSaturation {
+        hue: i32,
+        saturation: i32,
+        lightness: i32,
+    },
 }
 
 impl Adjustment {
@@ -3769,7 +3781,9 @@ pub enum Fill {
 /// too: Invert is `255 − v`; Brightness/Contrast the legacy `factor ×
 /// (v − 128) + 128 + brightness`, clamped; Threshold pure white where the
 /// BT.601 luma rounds to at least `level`, else black; Posterize each
-/// channel snapped to the nearest of `levels` steps across `0..=255`.
+/// channel snapped to the nearest of `levels` steps across `0..=255`;
+/// Hue/Saturation [`rgb_to_hsl`]'s own H/S/L shifted by `hue`/`saturation`/
+/// `lightness` and converted back with [`hsl_to_rgb`].
 pub fn apply_adjustment(adjustment: Adjustment, [r, g, b]: [u8; 3]) -> [u8; 3] {
     match adjustment {
         Adjustment::Invert => [255 - r, 255 - g, 255 - b],
@@ -3794,6 +3808,21 @@ pub fn apply_adjustment(adjustment: Adjustment, [r, g, b]: [u8; 3]) -> [u8; 3] {
             let step = 255.0 / (levels as f32 - 1.0);
             let quantize = |v: u8| -> u8 { ((v as f32 / step).round() * step).round() as u8 };
             [quantize(r), quantize(g), quantize(b)]
+        }
+        Adjustment::HueSaturation {
+            hue,
+            saturation,
+            lightness,
+        } => {
+            let hue_shift = hue.clamp(-180, 180) as f32;
+            let sat_factor = saturation.clamp(-100, 100) as f32 / 100.0;
+            let light_offset = lightness.clamp(-100, 100) as f32 / 100.0;
+            let (h, s, l) = rgb_to_hsl(r, g, b);
+            let h = (h + hue_shift).rem_euclid(360.0);
+            let s = (s * (1.0 + sat_factor)).clamp(0.0, 1.0);
+            let l = (l + light_offset).clamp(0.0, 1.0);
+            let (r, g, b) = hsl_to_rgb(h, s, l);
+            [r, g, b]
         }
     }
 }
@@ -24918,17 +24947,14 @@ impl Document {
         saturation: i32,
         lightness: i32,
     ) -> Result<Option<Rect>, String> {
-        let hue_shift = hue.clamp(-180, 180) as f32;
-        let sat_factor = saturation.clamp(-100, 100) as f32 / 100.0;
-        let light_offset = lightness.clamp(-100, 100) as f32 / 100.0;
-        self.adjust_layer_pixels(id, move |[r, g, b, a]| {
-            let (h, s, l) = rgb_to_hsl(r, g, b);
-            let h = (h + hue_shift).rem_euclid(360.0);
-            let s = (s * (1.0 + sat_factor)).clamp(0.0, 1.0);
-            let l = (l + light_offset).clamp(0.0, 1.0);
-            let (r, g, b) = hsl_to_rgb(h, s, l);
-            [r, g, b, a]
-        })
+        self.adjust_with(
+            id,
+            Adjustment::HueSaturation {
+                hue,
+                saturation,
+                lightness,
+            },
+        )
     }
 
     /// Image > Adjustments > Replace Color: [`Self::hue_saturation`]'s own
@@ -42847,7 +42873,11 @@ mod tests {
     #[test]
     fn adjustment_layers_match_their_destructive_commands() {
         // Brightness +30 at zero contrast adds 30; Posterize 2 snaps to
-        // 255/0/0; Threshold 100 makes luma 124.2 white.
+        // 255/0/0; Threshold 100 makes luma 124.2 white. Base pixel
+        // (200, 100, 50) is hue 20°, saturation 0.6, lightness 0.49
+        // (Python f32 model); Hue +60/Saturation -50%/Lightness +10% moves
+        // it to hue 80°, saturation 0.3, lightness 0.59, converting back to
+        // (161, 182, 119).
         for (adjustment, expected) in [
             (
                 Adjustment::BrightnessContrast {
@@ -42858,6 +42888,14 @@ mod tests {
             ),
             (Adjustment::Posterize { levels: 2 }, [255, 0, 0]),
             (Adjustment::Threshold { level: 100 }, [255, 255, 255]),
+            (
+                Adjustment::HueSaturation {
+                    hue: 60,
+                    saturation: -50,
+                    lightness: 10,
+                },
+                [161, 182, 119],
+            ),
         ] {
             let (mut doc, base) = base_pixel();
             doc.add_adjustment_layer("adj", adjustment).unwrap();
@@ -42873,6 +42911,13 @@ mod tests {
                 Adjustment::Posterize { levels } => baked.posterize(baked_id, levels).unwrap(),
                 Adjustment::Threshold { level } => baked.threshold(baked_id, level).unwrap(),
                 Adjustment::Invert => baked.invert_colors(baked_id).unwrap(),
+                Adjustment::HueSaturation {
+                    hue,
+                    saturation,
+                    lightness,
+                } => baked
+                    .hue_saturation(baked_id, hue, saturation, lightness)
+                    .unwrap(),
             };
             assert_eq!(&live[..3], expected, "{adjustment:?}");
             assert_eq!(live, composite_at(&baked, 0), "{adjustment:?}");

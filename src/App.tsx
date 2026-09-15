@@ -621,6 +621,8 @@ function adjustmentKindLabel(kind: Adjustment["kind"]): string {
       return "Threshold";
     case "posterize":
       return "Posterize";
+    case "hueSaturation":
+      return "Hue/Saturation";
     default:
       return "Invert";
   }
@@ -2158,6 +2160,9 @@ export default function App() {
   const [adjustmentContrast, setAdjustmentContrast] = useState(0);
   const [adjustmentLevel, setAdjustmentLevel] = useState(128);
   const [adjustmentLevels, setAdjustmentLevels] = useState(4);
+  const [adjustmentHue, setAdjustmentHue] = useState(0);
+  const [adjustmentSaturation, setAdjustmentSaturation] = useState(0);
+  const [adjustmentLightness, setAdjustmentLightness] = useState(0);
   // Layer > Smart Filters: the selected smart object's own filter list,
   // shown and edited from the same Adjustment Layer dialog.
   const [smartFilterList, setSmartFilterList] = useState<Adjustment[]>([]);
@@ -6557,6 +6562,13 @@ export default function App() {
         return { kind: "threshold", level: adjustmentLevel };
       case "posterize":
         return { kind: "posterize", levels: adjustmentLevels };
+      case "hueSaturation":
+        return {
+          kind: "hueSaturation",
+          hue: adjustmentHue,
+          saturation: adjustmentSaturation,
+          lightness: adjustmentLightness,
+        };
       default:
         return { kind: "invert" };
     }
@@ -6566,6 +6578,9 @@ export default function App() {
     adjustmentContrast,
     adjustmentLevel,
     adjustmentLevels,
+    adjustmentHue,
+    adjustmentSaturation,
+    adjustmentLightness,
   ]);
 
   const addAdjustmentLayer = useCallback(async () => {
@@ -26983,6 +26998,7 @@ export default function App() {
                 <option value="brightnessContrast">Brightness/Contrast</option>
                 <option value="threshold">Threshold</option>
                 <option value="posterize">Posterize</option>
+                <option value="hueSaturation">Hue/Saturation</option>
               </select>
             </label>
             {adjustmentKind === "brightnessContrast" && (
@@ -27054,6 +27070,59 @@ export default function App() {
                   }
                 />
               </label>
+            )}
+            {adjustmentKind === "hueSaturation" && (
+              <>
+                <label className="control">
+                  <span className="control__label">
+                    Hue
+                    <span className="control__value">{adjustmentHue}°</span>
+                  </span>
+                  <input
+                    type="range"
+                    min={-180}
+                    max={180}
+                    value={adjustmentHue}
+                    onChange={(event) =>
+                      setAdjustmentHue(Number(event.target.value))
+                    }
+                  />
+                </label>
+                <label className="control">
+                  <span className="control__label">
+                    Saturation
+                    <span className="control__value">
+                      {adjustmentSaturation}
+                    </span>
+                  </span>
+                  <input
+                    type="range"
+                    min={-100}
+                    max={100}
+                    value={adjustmentSaturation}
+                    onChange={(event) =>
+                      setAdjustmentSaturation(Number(event.target.value))
+                    }
+                  />
+                </label>
+                <label className="control">
+                  <span className="control__label">
+                    Lightness
+                    <span className="control__value">
+                      {adjustmentLightness}
+                    </span>
+                  </span>
+                  <input
+                    type="range"
+                    min={-100}
+                    max={100}
+                    value={adjustmentLightness}
+                    onChange={(event) =>
+                      setAdjustmentLightness(Number(event.target.value))
+                    }
+                  />
+                </label>
+              </>
             )}
             {document?.layers.find((l) => l.id === selectedId)?.smart && (
               <div className="control">

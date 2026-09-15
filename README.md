@@ -23769,6 +23769,58 @@ were re-run once to confirm (unaffected, as expected).
 
 Tests: 1921 Rust (unchanged), 36 frontend (33 → 36).
 
+## Phase 407 — Hue/Saturation as a Live Adjustment Layer
+
+ADJUSTMENT LAYER's own "the other adjustment kinds as live layers are a
+documented scope cut" line was next in `docs/PLAN_TO_100.md`'s Phase D
+backlog — the largest-impact item still open there, since Hue/Saturation
+is Photoshop's second most reached-for adjustment after Brightness/
+Contrast (already live since Phase 220) and, unlike Levels or Curves, is
+already a pure per-pixel RGB function with no histogram or lookup table
+to carry along live.
+
+`Adjustment` gained a fifth variant, `HueSaturation { hue: i32,
+saturation: i32, lightness: i32 }`, and `apply_adjustment` — the one
+shared function every live adjustment layer and its destructive-command
+twin both call, so the two can never drift — gained the exact math the
+destructive `hue_saturation` command already had: `rgb_to_hsl`, shift hue
+by `hue` degrees and clamp saturation/lightness by `saturation`/
+`lightness` percent, `hsl_to_rgb` back. `Document::hue_saturation` itself
+was rewritten to call `self.adjust_with(id, Adjustment::HueSaturation {
+… })` — the same one-line delegation `threshold`/`posterize`/
+`brightness_contrast` already use — instead of its own bespoke
+`adjust_layer_pixels` closure, so the destructive command and the new
+live layer are now provably the same code path rather than two
+hand-synced copies. `add_adjustment_layer`/`set_adjustment`/
+`add_smart_filter` needed no changes at all: all three already take a
+plain `Adjustment` value and dispatch through `apply_adjustment`
+generically, so a fifth variant costs them nothing.
+
+The Adjustment Layer dialog (also Smart Filters' own recipe picker, the
+same dialog) gained a Hue/Saturation option with Hue (-180°..180°),
+Saturation, and Lightness (-100..100) sliders, matching the destructive
+Hue/Saturation dialog's own ranges exactly.
+
+**Verified.** The existing `adjustment_layers_match_their_destructive_commands`
+test — which builds each adjustment as both a live layer and a baked
+destructive command from the same base pixel and asserts they composite
+identically — gained a fourth case: base pixel `(200, 100, 50)` is hue
+20°, saturation 0.6, lightness 0.49 (Python f32 model, matching
+`rgb_to_hsl`/`hsl_to_rgb` exactly); Hue +60°/Saturation -50%/Lightness
++10% moves it to hue 80°, saturation 0.3, lightness 0.59, converting back
+to `(161, 182, 119)` — confirmed against the live layer's own composite
+before ever running the test. All 8 pre-existing `hue_saturation` tests
+and all 10 other pre-existing `adjustment`-named tests pass unmodified,
+confirming the `adjust_with` rewrite changed nothing about the
+destructive command's own behaviour. `cargo fmt`/`clippy --all-targets
+-D warnings`/`test` and `npm run build`/`test`/`tsc --noEmit` all clean.
+
+Tests: 1921 Rust (unchanged — a new case inside the existing
+`adjustment_layers_match_their_destructive_commands` test, not a new
+`#[test]` function), 36 frontend (unchanged — a dialog option and three
+sliders reusing the existing Adjustment Layer dialog's own shape need no
+new test file).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
