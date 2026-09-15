@@ -6385,6 +6385,8 @@ fn graphic_pen(
 }
 
 /// Filter Gallery > Sketch > Chalk & Charcoal on layer `id`.
+/// `foreground_color`/`background_color` default to black/white,
+/// Photoshop's own toolbox defaults.
 #[tauri::command]
 fn chalk_and_charcoal(
     state: State<'_, AppState>,
@@ -6392,14 +6394,25 @@ fn chalk_and_charcoal(
     charcoal_area: u32,
     chalk_area: u32,
     stroke_pressure: u32,
+    foreground_color: Option<[u8; 3]>,
+    background_color: Option<[u8; 3]>,
 ) -> Result<Snapshot, String> {
     edit_checkpointed(&state, |document| {
-        document.chalk_and_charcoal(id, charcoal_area, chalk_area, stroke_pressure)
+        document.chalk_and_charcoal(
+            id,
+            charcoal_area,
+            chalk_area,
+            stroke_pressure,
+            foreground_color.unwrap_or([0, 0, 0]),
+            background_color.unwrap_or([255, 255, 255]),
+        )
     })
 }
 
 /// Filter Gallery > Sketch > Conté Crayon on layer `id`. `light_direction`
-/// as Texturizer's: 0 top, clockwise to 7 top-left.
+/// as Texturizer's: 0 top, clockwise to 7 top-left. `foreground_color`/
+/// `background_color` default to black/white, Photoshop's own toolbox
+/// defaults.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 fn conte_crayon(
@@ -6411,6 +6424,8 @@ fn conte_crayon(
     relief: u32,
     light_direction: u32,
     invert: bool,
+    foreground_color: Option<[u8; 3]>,
+    background_color: Option<[u8; 3]>,
 ) -> Result<Snapshot, String> {
     edit_checkpointed(&state, |document| {
         document.conte_crayon(
@@ -6421,6 +6436,8 @@ fn conte_crayon(
             relief,
             light_direction,
             invert,
+            foreground_color.unwrap_or([0, 0, 0]),
+            background_color.unwrap_or([255, 255, 255]),
         )
     })
 }

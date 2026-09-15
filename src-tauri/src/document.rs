@@ -22539,26 +22539,29 @@ impl Document {
     /// [`box_blur_at`] pre-smooths the layer by `stroke_pressure`, the
     /// same neighbourhood-average helper `box_blur` and this project's
     /// other smoothing filters already use. A documented approximation,
-    /// not a port of Photoshop's own charcoal-and-chalk renderer, which
-    /// also colours the result with the foreground/background colours
-    /// rather than fixed black/grey/white. `stroke_pressure` (this
-    /// project's own `0..=5` range, a documented simplification of
-    /// Photoshop's own dialog) is used directly as the blur radius;
-    /// `charcoal_area` (Photoshop's own `0..=50` range) sets the dark
-    /// threshold, `charcoal_area / 50 * 255`: a smoothed pixel at or
-    /// below it renders black; `chalk_area` (Photoshop's own `0..=20`
-    /// range) sets the light threshold, `255 - chalk_area / 20 * 255`: a
-    /// smoothed pixel at or above it renders white; anything between the
-    /// two thresholds renders mid-grey (`128`). Alpha untouched.
-    /// Confined to the selection, like every other filter here built on
-    /// [`Self::filter_pixels`]. Errors on an out-of-range parameter or a
-    /// locked/unknown layer.
+    /// not a port of Photoshop's own charcoal-and-chalk renderer.
+    /// `stroke_pressure` (this project's own `0..=5` range, a documented
+    /// simplification of Photoshop's own dialog) is used directly as the
+    /// blur radius; `charcoal_area` (Photoshop's own `0..=50` range) sets
+    /// the dark threshold, `charcoal_area / 50 * 255`: a smoothed pixel
+    /// at or below it renders in `foreground_color` (Photoshop's own
+    /// charcoal colour); `chalk_area` (Photoshop's own `0..=20` range)
+    /// sets the light threshold, `255 - chalk_area / 20 * 255`: a
+    /// smoothed pixel at or above it renders in `background_color`
+    /// (Photoshop's own chalk colour); anything between the two
+    /// thresholds renders the flat midpoint between the two colours,
+    /// this project's own stand-in for Photoshop's diagonal mid-tone
+    /// strokes. Alpha untouched. Confined to the selection, like every
+    /// other filter here built on [`Self::filter_pixels`]. Errors on an
+    /// out-of-range parameter or a locked/unknown layer.
     pub fn chalk_and_charcoal(
         &mut self,
         id: LayerId,
         charcoal_area: u32,
         chalk_area: u32,
         stroke_pressure: u32,
+        foreground_color: [u8; 3],
+        background_color: [u8; 3],
     ) -> Result<Option<Rect>, String> {
         if charcoal_area > 50 {
             return Err("Chalk & Charcoal charcoal area must be between 0 and 50.".to_string());
@@ -22574,6 +22577,7 @@ impl Document {
         let radius = stroke_pressure as i64;
         let dark_threshold = charcoal_area as f32 / 50.0 * 255.0;
         let light_threshold = 255.0 - chalk_area as f32 / 20.0 * 255.0;
+        let mid = tone_mix(foreground_color, background_color, 0.5);
         self.filter_pixels(id, move |src, row, col| {
             let base = (row as usize * doc_width + col as usize) * CHANNELS;
             let smoothed = if radius > 0 {
@@ -22586,33 +22590,35 @@ impl Document {
             let luma = 0.299 * smoothed[0] as f32
                 + 0.587 * smoothed[1] as f32
                 + 0.114 * smoothed[2] as f32;
-            let v = if luma <= dark_threshold {
-                0
+            let color = if luma <= dark_threshold {
+                foreground_color
             } else if luma >= light_threshold {
-                255
+                background_color
             } else {
-                128
+                mid
             };
-            [v, v, v, src[base + 3]]
+            [color[0], color[1], color[2], src[base + 3]]
         })
     }
 
     /// Filter Gallery > Sketch > Conté Crayon: reduces the layer to crayon
     /// and paper, then rubs the paper's texture through it. Each pixel's
     /// standard-weighted luma is mapped through Foreground Level and
-    /// Background Level (`1..=15` each): at or below `foreground / 15 ·
-    /// 128` it is black crayon, at or above `255 − background / 15 · 128`
-    /// white paper, and between the two a straight ramp from black to
-    /// white — with the levels so high that paper sits below crayon, a
+    /// Background Level (`1..=15` each): at or below `foreground_level / 15
+    /// · 128` it is pure `foreground_color` (Photoshop's own crayon,
+    /// black by default), at or above `255 − background_level / 15 · 128`
+    /// pure `background_color` (Photoshop's own paper, white by default),
+    /// and between the two a straight [`tone_mix`] ramp from one to the
+    /// other — with the levels so high that paper sits below crayon, a
     /// hard threshold at the crayon level. The texture is then
     /// [`Self::texturizer`]'s own — its `scale`, `relief`, `light_direction`
     /// (`0..=7`, top clockwise to top-left), and `invert` — skipped at
     /// Relief `0`. Alpha is kept and the selection confines it. Photoshop's
-    /// foreground and background colours, its Brick / Burlap / Canvas /
-    /// Sandstone textures, and loading a texture file are documented scope
-    /// cuts: the crayon is black on white over Texturizer's checkerboard
-    /// relief. Errors for a level out of `1..=15`, a texture setting
-    /// Texturizer refuses, or a locked or unknown layer.
+    /// Brick / Burlap / Canvas / Sandstone textures and loading a texture
+    /// file are documented scope cuts: the texture is always
+    /// Texturizer's own checkerboard relief. Errors for a level out of
+    /// `1..=15`, a texture setting Texturizer refuses, or a locked or
+    /// unknown layer.
     #[allow(clippy::too_many_arguments)]
     pub fn conte_crayon(
         &mut self,
@@ -22623,6 +22629,8 @@ impl Document {
         relief: u32,
         light_direction: u32,
         invert: bool,
+        foreground_color: [u8; 3],
+        background_color: [u8; 3],
     ) -> Result<Option<Rect>, String> {
         if !(1..=15).contains(&foreground_level) {
             return Err("Conté Crayon Foreground Level must be between 1 and 15.".to_string());
@@ -22647,20 +22655,21 @@ impl Document {
             let luma = 0.299 * src[base] as f32
                 + 0.587 * src[base + 1] as f32
                 + 0.114 * src[base + 2] as f32;
-            let v = if light <= dark {
+            let t = if light <= dark {
                 if luma <= dark {
-                    0
+                    0.0
                 } else {
-                    255
+                    1.0
                 }
             } else if luma <= dark {
-                0
+                0.0
             } else if luma >= light {
-                255
+                1.0
             } else {
-                ((luma - dark) / (light - dark) * 255.0).round() as u8
+                (luma - dark) / (light - dark)
             };
-            [v, v, v, src[base + 3]]
+            let color = tone_mix(foreground_color, background_color, t);
+            [color[0], color[1], color[2], src[base + 3]]
         })?;
         if relief == 0 {
             return Ok(touched);
@@ -31190,6 +31199,19 @@ pub fn measure(x0: f32, y0: f32, x1: f32, y1: f32) -> Result<Measurement, String
 /// Linear interpolation from `a` to `b` at `t` (`0.0..=1.0`).
 fn lerp(a: f32, b: f32, t: f32) -> f32 {
     a + (b - a) * t
+}
+
+/// A three-channel colour eased from `a` to `b` at `t` (`0.0..=1.0`),
+/// each channel through [`lerp`] and rounded to a byte -- Chalk &
+/// Charcoal's and Conté Crayon's own charcoal/chalk (or crayon/paper)
+/// colouring, Photoshop's own foreground/background pair standing in
+/// for a fixed black-to-white ramp.
+fn tone_mix(a: [u8; 3], b: [u8; 3], t: f32) -> [u8; 3] {
+    [
+        lerp(a[0] as f32, b[0] as f32, t).round() as u8,
+        lerp(a[1] as f32, b[1] as f32, t).round() as u8,
+        lerp(a[2] as f32, b[2] as f32, t).round() as u8,
+    ]
 }
 
 /// Paint Symmetry's axes: every stroke is repeated mirrored about the
@@ -46828,7 +46850,8 @@ mod tests {
         // dark threshold and render black.
         let idx = |x: usize, y: usize| (y * 4 + x) * 4;
         let (mut doc, id) = ink_outlines_cliff_fixture();
-        doc.chalk_and_charcoal(id, 10, 0, 0).unwrap();
+        doc.chalk_and_charcoal(id, 10, 0, 0, [0, 0, 0], [255, 255, 255])
+            .unwrap();
         let p = &doc.layers()[0].pixels;
         assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [128, 128, 128, 255]);
         assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [128, 128, 128, 255]);
@@ -46845,12 +46868,52 @@ mod tests {
         // two thresholds and render mid-grey.
         let idx = |x: usize, y: usize| (y * 4 + x) * 4;
         let (mut doc, id) = ink_outlines_cliff_fixture();
-        doc.chalk_and_charcoal(id, 0, 10, 0).unwrap();
+        doc.chalk_and_charcoal(id, 0, 10, 0, [0, 0, 0], [255, 255, 255])
+            .unwrap();
         let p = &doc.layers()[0].pixels;
         assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [255, 255, 255, 255]);
         assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [255, 255, 255, 255]);
         assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [128, 128, 128, 255]);
         assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [128, 128, 128, 255]);
+    }
+
+    #[test]
+    fn chalk_and_charcoal_colours_dark_and_light_pixels_with_the_foreground_and_background() {
+        // Same fixture and thresholds as the two tests above (dark 51,
+        // light 127.5), a custom foreground/background pair in place of
+        // black/white: luma 50 (columns 2-3) is at or below the dark
+        // threshold and takes the foreground exactly; luma 200 (columns
+        // 0-1) clears the light threshold and takes the background
+        // exactly -- neither falls in the mid band, so this is pure
+        // colour substitution with no blending arithmetic to verify yet.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        let fg = [10, 20, 30];
+        let bg = [200, 210, 220];
+        doc.chalk_and_charcoal(id, 10, 10, 0, fg, bg).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [200, 210, 220, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [200, 210, 220, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [10, 20, 30, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [10, 20, 30, 255]);
+    }
+
+    #[test]
+    fn chalk_and_charcoal_blends_the_midpoint_colour_for_mid_tones() {
+        // Charcoal area 10 (dark threshold 51), chalk area 0 (light
+        // threshold 255, never reached): luma 200 (columns 0-1) sits
+        // strictly between the two thresholds, the mid band. Hand-
+        // computed per channel: (10 + 200) / 2 = 105, (20 + 210) / 2 =
+        // 115, (31 + 220) / 2 = 125.5 -- Rust's f32::round rounds a
+        // half away from zero, so this rounds up to 126, not down.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        let fg = [10, 20, 31];
+        let bg = [200, 210, 220];
+        doc.chalk_and_charcoal(id, 10, 0, 0, fg, bg).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [105, 115, 126, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [105, 115, 126, 255]);
     }
 
     #[test]
@@ -46869,12 +46932,14 @@ mod tests {
         let idx = |x: usize, y: usize| (y * 4 + x) * 4;
 
         let (mut doc, id) = ink_outlines_cliff_fixture();
-        doc.chalk_and_charcoal(id, 21, 0, 1).unwrap();
+        doc.chalk_and_charcoal(id, 21, 0, 1, [0, 0, 0], [255, 255, 255])
+            .unwrap();
         let p = &doc.layers()[0].pixels;
         assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [0, 0, 0, 255]);
 
         let (mut doc, id) = ink_outlines_cliff_fixture();
-        doc.chalk_and_charcoal(id, 21, 0, 2).unwrap();
+        doc.chalk_and_charcoal(id, 21, 0, 2, [0, 0, 0], [255, 255, 255])
+            .unwrap();
         let p = &doc.layers()[0].pixels;
         assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [128, 128, 128, 255]);
     }
@@ -46885,7 +46950,9 @@ mod tests {
         let (mut doc, id) = ink_outlines_cliff_fixture();
         let before = doc.layers()[0].pixels.clone();
         doc.select_rectangle(1.0, 0.0, 2.0, 1.0).unwrap();
-        let dirty = doc.chalk_and_charcoal(id, 10, 0, 0).unwrap();
+        let dirty = doc
+            .chalk_and_charcoal(id, 10, 0, 0, [0, 0, 0], [255, 255, 255])
+            .unwrap();
         let after = &doc.layers()[0].pixels;
         assert_eq!(&after[idx(1, 0)..idx(1, 0) + 4], [128, 128, 128, 255]);
         assert_eq!(after[..idx(1, 0)], before[..idx(1, 0)]); // unselected, untouched
@@ -46904,14 +46971,24 @@ mod tests {
     #[test]
     fn chalk_and_charcoal_propagates_errors() {
         let (mut doc, id) = doc_with_one_layer();
-        assert!(doc.chalk_and_charcoal(id, 51, 0, 0).is_err());
-        assert!(doc.chalk_and_charcoal(id, 0, 21, 0).is_err());
-        assert!(doc.chalk_and_charcoal(id, 0, 0, 6).is_err());
+        assert!(doc
+            .chalk_and_charcoal(id, 51, 0, 0, [0, 0, 0], [255, 255, 255])
+            .is_err());
+        assert!(doc
+            .chalk_and_charcoal(id, 0, 21, 0, [0, 0, 0], [255, 255, 255])
+            .is_err());
+        assert!(doc
+            .chalk_and_charcoal(id, 0, 0, 6, [0, 0, 0], [255, 255, 255])
+            .is_err());
         doc.set_locked(id, true).unwrap();
-        assert!(doc.chalk_and_charcoal(id, 0, 0, 0).is_err());
+        assert!(doc
+            .chalk_and_charcoal(id, 0, 0, 0, [0, 0, 0], [255, 255, 255])
+            .is_err());
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
-        assert!(empty.chalk_and_charcoal(999, 0, 0, 0).is_err());
+        assert!(empty
+            .chalk_and_charcoal(999, 0, 0, 0, [0, 0, 0], [255, 255, 255])
+            .is_err());
     }
 
     #[test]
@@ -65365,7 +65442,8 @@ colorspaces:
         let (mut doc, id) = grey_pixels_4x4([
             50, 128, 200, 94, 195, 0, 255, 196, 93, 128, 128, 128, 50, 50, 200, 200,
         ]);
-        doc.conte_crayon(id, 11, 7, 1, 0, 7, false).unwrap();
+        doc.conte_crayon(id, 11, 7, 1, 0, 7, false, [0, 0, 0], [255, 255, 255])
+            .unwrap();
         let red = |x: u32, y: u32| pixel(&doc, id, x, y);
         assert_eq!(red(0, 0), [0, 0, 0, 255]);
         assert_eq!(red(1, 0), [86, 86, 86, 255]);
@@ -65386,17 +65464,43 @@ colorspaces:
             128, 129, 8, 247, 128, 0, 255, 9, 246, 64, 192, 100, 150, 20, 230, 128,
         ]);
         let mut ramp = doc.clone();
-        doc.conte_crayon(id, 15, 15, 1, 0, 7, false).unwrap();
+        doc.conte_crayon(id, 15, 15, 1, 0, 7, false, [0, 0, 0], [255, 255, 255])
+            .unwrap();
         assert_eq!(pixel(&doc, id, 0, 0)[0], 0);
         assert_eq!(pixel(&doc, id, 1, 0)[0], 255);
         assert_eq!(pixel(&doc, id, 1, 1)[0], 0);
         assert_eq!(pixel(&doc, id, 2, 1)[0], 255);
-        ramp.conte_crayon(id, 1, 1, 1, 0, 7, false).unwrap();
+        ramp.conte_crayon(id, 1, 1, 1, 0, 7, false, [0, 0, 0], [255, 255, 255])
+            .unwrap();
         assert_eq!(pixel(&ramp, id, 2, 0)[0], 0); // 8 ≤ 8.53
         assert_eq!(pixel(&ramp, id, 3, 0)[0], 255); // 247 ≥ 246.47
         assert_eq!(pixel(&ramp, id, 0, 1)[0], 128); // (128 − 8.53) / 237.9 · 255 = 128.0
         assert_eq!(pixel(&ramp, id, 3, 1)[0], 1); // 9: 0.47 / 237.9 · 255 = 0.5 → 1
         assert_eq!(pixel(&ramp, id, 0, 2)[0], 254); // 246: 237.47 / 237.9 · 255 = 254.4999 → 254
+    }
+
+    #[test]
+    fn conte_crayon_colours_the_ramp_between_the_foreground_and_background() {
+        // Same 1/1 levels as the ramp case above (dark 8.53, light
+        // 246.47, span 237.93), a custom foreground/background pair in
+        // place of black/white. Pixel (2, 0) at luma 8 sits at or below
+        // dark: pure foreground. Pixel (3, 0) at luma 247 sits at or
+        // above light: pure background. Pixel (0, 1) at luma 128 is the
+        // same ramp point the black/white case already pins to exactly
+        // 128 -- t = (128 − 8.5333) / 237.9333 = 1792 / 3569 ≈
+        // 0.502102 -- so with a foreground/background span of 100 per
+        // channel the blend is a + 100 · t ≈ a + 50.21, comfortably away
+        // from any rounding boundary: 0 + 50.21 → 50, 50 + 50.21 → 100,
+        // 100 + 50.21 → 150.
+        let (mut doc, id) = grey_pixels_4x4([
+            128, 129, 8, 247, 128, 0, 255, 9, 246, 64, 192, 100, 150, 20, 230, 128,
+        ]);
+        let fg = [0, 50, 100];
+        let bg = [100, 150, 200];
+        doc.conte_crayon(id, 1, 1, 1, 0, 7, false, fg, bg).unwrap();
+        assert_eq!(pixel(&doc, id, 2, 0), [0, 50, 100, 255]);
+        assert_eq!(pixel(&doc, id, 3, 0), [100, 150, 200, 255]);
+        assert_eq!(pixel(&doc, id, 0, 1), [50, 100, 150, 255]);
     }
 
     #[test]
@@ -65406,17 +65510,22 @@ colorspaces:
         // pixel whose toward and away cells match keeps 86, one whose
         // away cell is low drops to 76; Invert lifts it to 96 instead.
         let (mut doc, id) = grey_pixels_4x4([128; 16]);
-        doc.conte_crayon(id, 11, 7, 1, 10, 7, false).unwrap();
+        doc.conte_crayon(id, 11, 7, 1, 10, 7, false, [0, 0, 0], [255, 255, 255])
+            .unwrap();
         assert_eq!(pixel(&doc, id, 1, 1)[0], 86);
         assert_eq!(pixel(&doc, id, 0, 0)[0], 86);
         assert_eq!(pixel(&doc, id, 1, 0)[0], 76);
         assert_eq!(pixel(&doc, id, 0, 1)[0], 76);
         let (mut composed, id_b) = grey_pixels_4x4([128; 16]);
-        composed.conte_crayon(id_b, 11, 7, 1, 0, 7, false).unwrap();
+        composed
+            .conte_crayon(id_b, 11, 7, 1, 0, 7, false, [0, 0, 0], [255, 255, 255])
+            .unwrap();
         composed.texturizer(id_b, 1, 10, 7, false).unwrap();
         assert_eq!(doc.layers()[0].pixels, composed.layers()[0].pixels);
         let (mut inverted, id_c) = grey_pixels_4x4([128; 16]);
-        inverted.conte_crayon(id_c, 11, 7, 1, 10, 7, true).unwrap();
+        inverted
+            .conte_crayon(id_c, 11, 7, 1, 10, 7, true, [0, 0, 0], [255, 255, 255])
+            .unwrap();
         assert_eq!(pixel(&inverted, id_c, 1, 0)[0], 96);
         assert_eq!(pixel(&inverted, id_c, 1, 1)[0], 86);
     }
@@ -65428,13 +65537,16 @@ colorspaces:
             .add_layer("two", &[128, 128, 128, 77, 200, 200, 200, 255], 2, 1)
             .unwrap();
         doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
-        doc.conte_crayon(id, 11, 7, 1, 0, 7, false).unwrap();
+        doc.conte_crayon(id, 11, 7, 1, 0, 7, false, [0, 0, 0], [255, 255, 255])
+            .unwrap();
         assert_eq!(pixel(&doc, id, 0, 0), [86, 86, 86, 77]);
         assert_eq!(pixel(&doc, id, 1, 0), [200, 200, 200, 255]);
         // Colour is reduced through its luma: pure red (luma 76) is crayon.
         let mut colour = Document::new(1, 1).unwrap();
         let cid = colour.add_layer("red", &[255, 0, 0, 255], 1, 1).unwrap();
-        colour.conte_crayon(cid, 11, 7, 1, 0, 7, false).unwrap();
+        colour
+            .conte_crayon(cid, 11, 7, 1, 0, 7, false, [0, 0, 0], [255, 255, 255])
+            .unwrap();
         assert_eq!(pixel(&colour, cid, 0, 0), [0, 0, 0, 255]);
     }
 
@@ -65443,37 +65555,39 @@ colorspaces:
         let (mut doc, id) = grey_pixels_4x4([128; 16]);
         let before = doc.layers()[0].pixels.clone();
         assert!(doc
-            .conte_crayon(id, 0, 7, 1, 0, 7, false)
+            .conte_crayon(id, 0, 7, 1, 0, 7, false, [0, 0, 0], [255, 255, 255])
             .unwrap_err()
             .contains("Foreground"));
         assert!(doc
-            .conte_crayon(id, 16, 7, 1, 0, 7, false)
+            .conte_crayon(id, 16, 7, 1, 0, 7, false, [0, 0, 0], [255, 255, 255])
             .unwrap_err()
             .contains("Foreground"));
         assert!(doc
-            .conte_crayon(id, 11, 0, 1, 0, 7, false)
+            .conte_crayon(id, 11, 0, 1, 0, 7, false, [0, 0, 0], [255, 255, 255])
             .unwrap_err()
             .contains("Background"));
         assert!(doc
-            .conte_crayon(id, 11, 7, 0, 0, 7, false)
+            .conte_crayon(id, 11, 7, 0, 0, 7, false, [0, 0, 0], [255, 255, 255])
             .unwrap_err()
             .contains("Scaling"));
         assert!(doc
-            .conte_crayon(id, 11, 7, 251, 0, 7, false)
+            .conte_crayon(id, 11, 7, 251, 0, 7, false, [0, 0, 0], [255, 255, 255])
             .unwrap_err()
             .contains("Scaling"));
         assert!(doc
-            .conte_crayon(id, 11, 7, 1, 51, 7, false)
+            .conte_crayon(id, 11, 7, 1, 51, 7, false, [0, 0, 0], [255, 255, 255])
             .unwrap_err()
             .contains("Relief"));
         assert!(doc
-            .conte_crayon(id, 11, 7, 1, 0, 8, false)
+            .conte_crayon(id, 11, 7, 1, 0, 8, false, [0, 0, 0], [255, 255, 255])
             .unwrap_err()
             .contains("Light"));
-        assert!(doc.conte_crayon(999, 11, 7, 1, 0, 7, false).is_err());
+        assert!(doc
+            .conte_crayon(999, 11, 7, 1, 0, 7, false, [0, 0, 0], [255, 255, 255])
+            .is_err());
         doc.set_locked(id, true).unwrap();
         assert!(doc
-            .conte_crayon(id, 11, 7, 1, 0, 7, false)
+            .conte_crayon(id, 11, 7, 1, 0, 7, false, [0, 0, 0], [255, 255, 255])
             .unwrap_err()
             .contains("locked"));
         assert_eq!(doc.layers()[0].pixels, before);

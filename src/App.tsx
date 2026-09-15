@@ -2681,11 +2681,17 @@ export default function App() {
   const [conteRelief, setConteRelief] = useState(4);
   const [conteLight, setConteLight] = useState(7);
   const [conteInvert, setConteInvert] = useState(false);
+  const [conteForegroundColor, setConteForegroundColor] = useState("#000000");
+  const [conteBackgroundColor, setConteBackgroundColor] = useState("#ffffff");
   const [chalkAndCharcoalCharcoalArea, setChalkAndCharcoalCharcoalArea] =
     useState(10);
   const [chalkAndCharcoalChalkArea, setChalkAndCharcoalChalkArea] = useState(5);
   const [chalkAndCharcoalStrokePressure, setChalkAndCharcoalStrokePressure] =
     useState(1);
+  const [chalkAndCharcoalForegroundColor, setChalkAndCharcoalForegroundColor] =
+    useState("#000000");
+  const [chalkAndCharcoalBackgroundColor, setChalkAndCharcoalBackgroundColor] =
+    useState("#ffffff");
   const [showPlasterDialog, setShowPlasterDialog] = useState(false);
   const [plasterImageBalance, setPlasterImageBalance] = useState(20);
   const [plasterSmoothness, setPlasterSmoothness] = useState(5);
@@ -8343,6 +8349,8 @@ export default function App() {
       charcoalArea: chalkAndCharcoalCharcoalArea,
       chalkArea: chalkAndCharcoalChalkArea,
       strokePressure: chalkAndCharcoalStrokePressure,
+      foregroundColor: hexToRgb(chalkAndCharcoalForegroundColor),
+      backgroundColor: hexToRgb(chalkAndCharcoalBackgroundColor),
     });
     setShowChalkAndCharcoalDialog(false);
   }, [
@@ -8351,6 +8359,8 @@ export default function App() {
     chalkAndCharcoalCharcoalArea,
     chalkAndCharcoalChalkArea,
     chalkAndCharcoalStrokePressure,
+    chalkAndCharcoalForegroundColor,
+    chalkAndCharcoalBackgroundColor,
   ]);
 
   const applyConteCrayon = useCallback(async () => {
@@ -8363,6 +8373,8 @@ export default function App() {
       relief: conteRelief,
       lightDirection: conteLight,
       invert: conteInvert,
+      foregroundColor: hexToRgb(conteForegroundColor),
+      backgroundColor: hexToRgb(conteBackgroundColor),
     });
     setShowConteDialog(false);
   }, [
@@ -8374,6 +8386,8 @@ export default function App() {
     conteRelief,
     conteLight,
     conteInvert,
+    conteForegroundColor,
+    conteBackgroundColor,
   ]);
 
   const applyPlaster = useCallback(async () => {
@@ -33124,6 +33138,26 @@ export default function App() {
                 <span className="control__label">Invert</span>
               </label>
             </label>
+            <label className="control control--row">
+              <span className="control__label">Crayon (Foreground)</span>
+              <input
+                type="color"
+                value={conteForegroundColor}
+                onChange={(event) =>
+                  setConteForegroundColor(event.target.value)
+                }
+              />
+              <span className="control__label" style={{ marginLeft: 12 }}>
+                Paper (Background)
+              </span>
+              <input
+                type="color"
+                value={conteBackgroundColor}
+                onChange={(event) =>
+                  setConteBackgroundColor(event.target.value)
+                }
+              />
+            </label>
             <div className="modal__actions">
               <button
                 className="button button--quiet"
@@ -33206,6 +33240,26 @@ export default function App() {
                 value={chalkAndCharcoalStrokePressure}
                 onChange={(event) =>
                   setChalkAndCharcoalStrokePressure(Number(event.target.value))
+                }
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Charcoal (Foreground)</span>
+              <input
+                type="color"
+                value={chalkAndCharcoalForegroundColor}
+                onChange={(event) =>
+                  setChalkAndCharcoalForegroundColor(event.target.value)
+                }
+              />
+              <span className="control__label" style={{ marginLeft: 12 }}>
+                Chalk (Background)
+              </span>
+              <input
+                type="color"
+                value={chalkAndCharcoalBackgroundColor}
+                onChange={(event) =>
+                  setChalkAndCharcoalBackgroundColor(event.target.value)
                 }
               />
             </label>

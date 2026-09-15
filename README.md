@@ -24825,6 +24825,70 @@ Tests: 1958 Rust (1957 → 1958: one new test, `tip_stroke_dynamic`'s own
 captured-tip path deliberately out of this phase's scope — see the
 parity row), 39 frontend (unchanged).
 
+## Phase 425 — Chalk & Charcoal and Conté Crayon's Foreground/Background Colouring
+
+Phase D's fourth named priority, "the remaining Filter Gallery
+options," closes a scope cut two rows shared word for word: Chalk &
+Charcoal's and Conté Crayon's own rows both named "Photoshop's own
+foreground/background colouring" as what they were missing, having
+shipped everything else — Chalk & Charcoal's three-way threshold, Conté
+Crayon's own levels and Texturizer relief — fixed to black/white/grey
+regardless of the tools' own colour choice.
+
+Both filters already reduce a pixel to a `0..=255` tone against one or
+two thresholds; the only change is what that tone means. A new free
+function, `tone_mix(a, b, t)`, eases two `[u8; 3]` colours by `t`
+(`0.0..=1.0`) through the existing `lerp` per channel, rounding each to
+a byte — Chalk & Charcoal's own flat mid-tone (`tone_mix(fg, bg,
+0.5)`, computed once outside the pixel closure since it never depends
+on the pixel) and Conté Crayon's own ramp (`tone_mix(fg, bg, t)` at
+the same fraction `t` the old code used to compute a grey value
+directly) both reuse it. Both functions gained two new parameters,
+`foreground_color`/`background_color: [u8; 3]`, and both Tauri
+commands take them as `Option<[u8; 3]>`, defaulting to black/white —
+Photoshop's own toolbox defaults — so every existing caller (this
+project's own docs, scripts, and the 15 pre-existing tests) keeps
+working unchanged. Conté Crayon already had unrelated parameters
+named `foreground_level`/`background_level` (Photoshop's own tone
+thresholds, not colours), so the new ones are deliberately named
+`_color` rather than reusing or shadowing that naming.
+
+Three new hand-computed tests. Chalk & Charcoal, reusing the shared
+4×4 cliff fixture (columns 0–1 at luma 200, columns 2–3 at luma 50)
+other filters here already use: with charcoal/chalk areas 10/10 (dark
+threshold 51, light threshold 127.5) and a foreground/background pair
+of `[10, 20, 30]`/`[200, 210, 220]`, the dark columns take the
+foreground and the light columns the background exactly, no blending
+yet to verify; with areas 10/0 (light threshold 255, never reached)
+and a pair chosen so the midpoint doesn't round cleanly —
+`[10, 20, 31]`/`[200, 210, 220]` — the mid-tone band blends to
+`[105, 115, 126]`, hand-computed as `(10+200)/2 = 105`,
+`(20+210)/2 = 115`, `(31+220)/2 = 125.5`, and Rust's `f32::round`
+rounding a half away from zero rather than down, to `126`. Conté
+Crayon reuses the existing ramp fixture and its own already-verified
+1/1-level thresholds (dark 8.53, light 246.47): a foreground/background
+pair with a clean 100-per-channel span, `[0, 50, 100]`/`[100, 150,
+200]`, confirms the two hard-threshold pixels (luma 8 and 247) take
+pure foreground and background, and the same ramp pixel (luma 128) the
+black/white case already pins to exactly grey 128 works out to
+`t ≈ 0.502102` — computed as the exact fraction `1792/3569` from the
+level thresholds — landing on `[50, 100, 150]`, comfortably clear of
+any rounding boundary. All 15 pre-existing tests across both filters
+pass unmodified, confirming the black/white defaults reproduce the old
+hardcoded output byte for byte.
+
+Frontend: both dialogs gained a Foreground/Background colour-picker
+pair (Chalk & Charcoal: "Charcoal"/"Chalk"; Conté Crayon: "Crayon"/
+"Paper", matching each filter's own vocabulary), defaulting to black/
+white and sent through the existing `hexToRgb` helper every other
+colour picker in this app already uses — no new pure logic, so the
+frontend test count is unchanged. `cargo fmt`/`clippy --all-targets -D
+warnings`/`test` and `npx tsc --noEmit`/`npm run build`/`npm test` all
+clean.
+
+Tests: 1961 Rust (1958 → 1961: three new tests), 39 frontend
+(unchanged).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
