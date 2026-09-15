@@ -4409,6 +4409,7 @@ fn sponge_stroke(
 /// Blur tool: soften along `points` on layer `id` by `strength` percent.
 /// See [`paint_stroke`] for `points` and checkpointing.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 fn blur_stroke(
     state: State<'_, AppState>,
     id: LayerId,
@@ -4416,13 +4417,17 @@ fn blur_stroke(
     radius: f32,
     strength: u8,
     sample_all_layers: Option<bool>,
+    blend_mode: Option<BlendMode>,
 ) -> Result<Snapshot, String> {
     edit(&state, |document| {
         document.stroke_sampling(
             id,
             &points,
             radius,
-            Stroke::Blur { strength },
+            Stroke::Blur {
+                strength,
+                blend_mode: blend_mode.unwrap_or_default(),
+            },
             sample_all_layers.unwrap_or(false),
         )
     })

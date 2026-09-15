@@ -23368,6 +23368,58 @@ Tests: 1912 Rust (1911 → 1912), 33 frontend (unchanged — a toolbar
 slider, no dedicated frontend test suite for the toolbar's plain
 buttons).
 
+## Phase 399 — Blur Tool's Blend Mode
+
+BLUR TOOL's own "the blend-mode option is a documented scope cut" line
+was the next largest-impact item in `docs/PLAN_TO_100.md`'s Phase D
+backlog. `Stroke::Blur` gained a new required field, `blend_mode:
+BlendMode`, alongside its existing `strength` — the enum variant itself
+widened rather than adding a new `Stroke` case, since `stroke_inner`'s
+own match dispatches on `Stroke`'s shape directly and this is the same
+kind of narrowing every other blend-mode-bearing tool and layer style
+already makes. Unlike those, `Stroke::Blur` has no single shared test
+helper the way `BevelEmbossOptions`/`GradientOverlayOptions` do — its
+~11 real call sites across this project's own test suite construct it
+directly (`Stroke::Blur { strength: N }`), so each one needed
+`blend_mode: BlendMode::Normal` added mechanically (a scripted find of
+the exact literal shape, checked afterwards with `cargo build`/`cargo
+test --no-run` to confirm nothing was missed — one real miss, the
+`blur_stroke` Tauri command in `lib.rs`, was caught exactly that way).
+The stroke's own RGB mix — previously a flat `lerp` toward the pre-stroke
+box blur — now runs each channel through `blend_mode.blend(Cb, Cs)`
+first; alpha keeps its own flat `lerp` regardless of blend mode, as
+every other blend-mode narrowing in this project already leaves alpha
+untouched by the chosen mode. `BlendMode::Normal` collapses the RGB path
+back to the original formula exactly. The stale "Sample All Layers...
+documented scope cut" half of the enum's own doc comment was also
+corrected — Phase 373 already resolved that one via `stroke_sampling`,
+leaving only Blend Mode as this variant's real remaining gap.
+`blur_stroke`'s Tauri command widened to take an optional `blendMode`
+(defaulting to Normal, matching this command's own existing
+`sampleAllLayers: Option<bool>` convention rather than every other
+blend-mode command's required-parameter one). The frontend's Blur tool
+options bar gained a Mode dropdown next to Sample All Layers, sending
+`blendMode` only on the Blur branch of the shared Blur/Sharpen stroke
+handler — Sharpen has no blend-mode field to send.
+
+**Verified.** All 5 pre-existing Blur tool tests (plus every other
+`Stroke::Blur`-touching test in the suite) pass unmodified in behaviour,
+confirming `BlendMode::Normal` is a byte-for-byte no-op on top of the
+mechanical `blend_mode: BlendMode::Normal` addition. One new
+hand-computed test, `blur_tool_multiply_blends_the_blurred_colour_first`,
+reuses `blur_tool_at_full_strength_matches_the_box_blur_filter`'s own
+full-coverage fixture (own `R = 10` at `(0, 0)`, pre-stroke box blur
+`R = 23`) through Multiply instead of Normal: `(10/255) · (23/255) ·
+255 ≈ 0.9 → 1`, far from Normal's own full-strength replacement with
+the blurred value outright (`23`) — a real, contrasting result; G and B
+are 0 own and 0 blurred everywhere in this fixture, so both blend modes
+agree there, and alpha (255 either way) is untouched by blend mode as
+designed. `cargo fmt`/`clippy --all-targets -D warnings`/`test` and
+`npm run build`/`test`/`tsc --noEmit` all clean.
+
+Tests: 1913 Rust (1912 → 1913), 33 frontend (unchanged — one dropdown,
+same pattern as the prior six phases').
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

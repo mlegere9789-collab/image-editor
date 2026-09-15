@@ -1879,6 +1879,7 @@ export default function App() {
   // Sample All Layers for the other neighbourhood tools: Blur, Smudge,
   // Clone Stamp, Healing Brush, Spot Healing Brush and Mixer Brush.
   const [sampleAllLayers, setSampleAllLayers] = useState(false);
+  const [blurBlendMode, setBlurBlendMode] = useState<BlendMode>("normal");
   const [magicWandContiguous, setMagicWandContiguous] = useState(true);
   const [magicWandAntiAlias, setMagicWandAntiAlias] = useState(true);
   const [magicWandSampleAll, setMagicWandSampleAll] = useState(false);
@@ -9750,7 +9751,7 @@ export default function App() {
                 protectDetail: sharpenProtectDetail,
                 sampleAllLayers: sharpenSampleAll,
               }
-            : { sampleAllLayers }),
+            : { sampleAllLayers, blendMode: blurBlendMode }),
         });
       } else if (tool === "historyBrush") {
         void runCommand("history_stroke", {
@@ -9886,6 +9887,7 @@ export default function App() {
       sharpenProtectDetail,
       sharpenSampleAll,
       sampleAllLayers,
+      blurBlendMode,
       toneRange,
       protectTones,
       spongeVibrance,
@@ -15350,6 +15352,24 @@ export default function App() {
                 onChange={(event) => setSampleAllLayers(event.target.checked)}
               />
               Sample All Layers
+            </label>
+          )}
+          {tool === "blur" && (
+            <label className="tools__slider">
+              Mode
+              <select
+                value={blurBlendMode}
+                disabled={!canPaint}
+                onChange={(event) =>
+                  setBlurBlendMode(event.target.value as BlendMode)
+                }
+              >
+                {blendModes.map((info) => (
+                  <option key={info.mode} value={info.mode}>
+                    {info.label}
+                  </option>
+                ))}
+              </select>
             </label>
           )}
           {tool === "sharpen" && (

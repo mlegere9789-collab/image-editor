@@ -20053,7 +20053,10 @@ impl Document {
                         px.copy_from_slice(&[r, g, b]);
                         continue;
                     }
-                    Stroke::Blur { strength } => {
+                    Stroke::Blur {
+                        strength,
+                        blend_mode,
+                    } => {
                         let source: &[u8] = if sample_all_layers {
                             composite_snapshot.as_deref().expect("taken above")
                         } else {
@@ -20069,12 +20072,17 @@ impl Document {
                             1,
                         );
                         let amount = f32::from(strength) / 100.0 * c;
-                        for (slot, &target) in layer.pixels[base..base + CHANNELS]
+                        for (slot, &target) in layer.pixels[base..base + 3]
                             .iter_mut()
-                            .zip(blurred.iter())
+                            .zip(blurred[..3].iter())
                         {
-                            *slot = to_byte(lerp(to_unit(*slot), to_unit(target), amount));
+                            let cb = to_unit(*slot);
+                            let blended = blend_mode.blend(cb, to_unit(target));
+                            *slot = to_byte(cb * (1.0 - amount) + blended * amount);
                         }
+                        let alpha_slot = &mut layer.pixels[base + 3];
+                        *alpha_slot =
+                            to_byte(lerp(to_unit(*alpha_slot), to_unit(blurred[3]), amount));
                         continue;
                     }
                     Stroke::Sharpen {
@@ -30112,13 +30120,19 @@ pub enum Stroke<'a> {
     /// and alpha, and skipping fully transparent pixels. Photoshop's
     /// Vibrance option is a documented scope cut.
     Sponge { flow: u8, saturate: bool },
-    /// The Blur tool: moves each covered pixel — all four channels — toward
-    /// the radius-1 box blur ([`box_blur_at`]) of the layer as it stood
-    /// before the stroke, by `strength` percent scaled by the brush's
-    /// coverage. Reading the pre-stroke snapshot means a stroke never
-    /// smears its own output along its path. Photoshop's Sample All Layers
-    /// and its blend-mode option are documented scope cuts.
-    Blur { strength: u8 },
+    /// The Blur tool: moves each covered pixel's RGB toward the radius-1
+    /// box blur ([`box_blur_at`]) of the layer as it stood before the
+    /// stroke, by `strength` percent scaled by the brush's coverage, each
+    /// channel run through `blend_mode.blend(Cb, Cs)` first — the same
+    /// narrowing every other blend-mode-bearing tool and layer style
+    /// already makes, `BlendMode::Normal` collapsing back to the original
+    /// flat mix. Alpha always moves by the same flat mix regardless of
+    /// blend mode, as every other blend-mode narrowing in this project
+    /// already keeps alpha untouched by the chosen mode. Reading the
+    /// pre-stroke snapshot means a stroke never smears its own output
+    /// along its path. Photoshop's Sample All Layers reads the pre-stroke
+    /// composite (see [`Self::stroke_sampling`], README Phase 373).
+    Blur { strength: u8, blend_mode: BlendMode },
     /// The Sharpen tool: [`Stroke::Blur`]'s opposite — each covered pixel's
     /// R, G, and B move away from the radius-1 box blur of the pre-stroke
     /// layer by `strength` percent scaled by the brush's coverage, the
@@ -37301,8 +37315,16 @@ mod tests {
         // is exactly Filter > Blur > Box Blur at radius 1 -- including the
         // edge-clamped corners ((10+10+20)*2 + 40+40+50) / 9 = 23.
         let (mut doc, id) = ramped_3x3();
-        doc.stroke(id, &[(1.0, 1.0)], 3.0, Stroke::Blur { strength: 100 })
-            .unwrap();
+        doc.stroke(
+            id,
+            &[(1.0, 1.0)],
+            3.0,
+            Stroke::Blur {
+                strength: 100,
+                blend_mode: BlendMode::Normal,
+            },
+        )
+        .unwrap();
         assert_eq!(
             red_channel_grid(&doc),
             vec![vec![23, 30, 36], vec![43, 50, 56], vec![63, 70, 76]]
@@ -37313,15 +37335,60 @@ mod tests {
     }
 
     #[test]
+    fn blur_tool_multiply_blends_the_blurred_colour_first() {
+        // Same full-coverage setup as blur_tool_at_full_strength_matches_
+        // the_box_blur_filter (radius 3 at the centre covers the whole
+        // 3x3 canvas, so coverage = 1 everywhere and the pre-stroke box
+        // blur at (0, 0) is exactly R = 23), but through Multiply instead
+        // of Normal. Multiply's own B(Cb, Cs) = Cb * Cs on R:
+        // (10/255) * (23/255) * 255 = 230/255 = 0.902 -> 1, far from
+        // Normal's own full-strength replacement with the blurred value
+        // outright (23, per that other test) -- a real, contrasting
+        // result. G and B are 0 own and 0 blurred everywhere in this
+        // fixture, so Cb * Cs = 0 either way, same as Normal's own
+        // replace-with-0 result for those two channels. Alpha (255 own,
+        // 255 blurred) is untouched by blend mode, as every other
+        // blend-mode narrowing in this project keeps it.
+        let (mut doc, id) = ramped_3x3();
+        doc.stroke(
+            id,
+            &[(1.0, 1.0)],
+            3.0,
+            Stroke::Blur {
+                strength: 100,
+                blend_mode: BlendMode::Multiply,
+            },
+        )
+        .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [1, 0, 0, 255]);
+    }
+
+    #[test]
     fn blur_tool_strength_scales_the_move() {
         // Half way from 10 to 23 is 16.5 -> 17; strength 0 changes nothing.
         let (mut doc, id) = ramped_3x3();
-        doc.stroke(id, &[(1.0, 1.0)], 3.0, Stroke::Blur { strength: 50 })
-            .unwrap();
+        doc.stroke(
+            id,
+            &[(1.0, 1.0)],
+            3.0,
+            Stroke::Blur {
+                strength: 50,
+                blend_mode: BlendMode::Normal,
+            },
+        )
+        .unwrap();
         assert_eq!(pixel(&doc, id, 0, 0)[0], 17);
         let (mut doc, id) = ramped_3x3();
-        doc.stroke(id, &[(1.0, 1.0)], 3.0, Stroke::Blur { strength: 0 })
-            .unwrap();
+        doc.stroke(
+            id,
+            &[(1.0, 1.0)],
+            3.0,
+            Stroke::Blur {
+                strength: 0,
+                blend_mode: BlendMode::Normal,
+            },
+        )
+        .unwrap();
         assert_eq!(doc.layers()[0].pixels, ramped_3x3().0.layers()[0].pixels);
     }
 
@@ -37329,8 +37396,16 @@ mod tests {
     fn blur_tool_scales_with_the_brushs_soft_edge_coverage() {
         // The 0.7929 edge coverage moves 10 toward 23 by 10.3 -> 20.
         let (mut doc, id) = ramped_3x3();
-        doc.stroke(id, &[(1.0, 1.0)], 1.0, Stroke::Blur { strength: 100 })
-            .unwrap();
+        doc.stroke(
+            id,
+            &[(1.0, 1.0)],
+            1.0,
+            Stroke::Blur {
+                strength: 100,
+                blend_mode: BlendMode::Normal,
+            },
+        )
+        .unwrap();
         assert_eq!(pixel(&doc, id, 0, 0)[0], 20);
     }
 
@@ -37339,14 +37414,30 @@ mod tests {
         // depth_ramped_3x3's alpha columns 0 / 128 / 255 average to 127 at
         // the centre; its red stays the symmetric 50.
         let (mut doc, id) = depth_ramped_3x3();
-        doc.stroke(id, &[(1.0, 1.0)], 3.0, Stroke::Blur { strength: 100 })
-            .unwrap();
+        doc.stroke(
+            id,
+            &[(1.0, 1.0)],
+            3.0,
+            Stroke::Blur {
+                strength: 100,
+                blend_mode: BlendMode::Normal,
+            },
+        )
+        .unwrap();
         assert_eq!(pixel(&doc, id, 1, 1), [50, 0, 0, 127]);
 
         let (mut doc, id) = ramped_3x3();
         doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
-        doc.stroke(id, &[(1.0, 1.0)], 3.0, Stroke::Blur { strength: 100 })
-            .unwrap();
+        doc.stroke(
+            id,
+            &[(1.0, 1.0)],
+            3.0,
+            Stroke::Blur {
+                strength: 100,
+                blend_mode: BlendMode::Normal,
+            },
+        )
+        .unwrap();
         assert_eq!(pixel(&doc, id, 0, 0)[0], 23);
         assert_eq!(pixel(&doc, id, 1, 1)[0], 50);
         assert_eq!(pixel(&doc, id, 1, 0)[0], 20);
@@ -37362,7 +37453,10 @@ mod tests {
             id,
             &[(0.0, 0.0), (3.0, 3.0)],
             3.0,
-            Stroke::Blur { strength: 100 },
+            Stroke::Blur {
+                strength: 100,
+                blend_mode: BlendMode::Normal,
+            },
         )
         .unwrap();
         assert_eq!(
@@ -37371,7 +37465,15 @@ mod tests {
         );
         doc.set_locked(id, true).unwrap();
         assert!(doc
-            .stroke(id, &[(1.0, 1.0)], 3.0, Stroke::Blur { strength: 100 })
+            .stroke(
+                id,
+                &[(1.0, 1.0)],
+                3.0,
+                Stroke::Blur {
+                    strength: 100,
+                    blend_mode: BlendMode::Normal
+                }
+            )
             .is_err());
     }
 
@@ -48254,7 +48356,10 @@ mod tests {
             top,
             &[(2.5, 2.5)],
             0.5,
-            Stroke::Blur { strength: 100 },
+            Stroke::Blur {
+                strength: 100,
+                blend_mode: BlendMode::Normal,
+            },
             false,
         )
         .unwrap();
@@ -48264,7 +48369,10 @@ mod tests {
             top,
             &[(2.5, 2.5)],
             0.5,
-            Stroke::Blur { strength: 100 },
+            Stroke::Blur {
+                strength: 100,
+                blend_mode: BlendMode::Normal,
+            },
             true,
         )
         .unwrap();
@@ -48311,8 +48419,16 @@ mod tests {
         assert_eq!(dot_red(&doc), 0);
         // The flag means nothing to a plain brush, and stroke is the flag off.
         let (mut doc, top) = setup(&dot_layer());
-        doc.stroke(top, &[(2.5, 2.5)], 0.5, Stroke::Blur { strength: 100 })
-            .unwrap();
+        doc.stroke(
+            top,
+            &[(2.5, 2.5)],
+            0.5,
+            Stroke::Blur {
+                strength: 100,
+                blend_mode: BlendMode::Normal,
+            },
+        )
+        .unwrap();
         assert_eq!(dot_red(&doc), 0);
     }
 
