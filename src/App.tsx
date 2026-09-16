@@ -647,6 +647,8 @@ function adjustmentKindLabel(kind: Adjustment["kind"]): string {
       return "Photo Filter";
     case "vibrance":
       return "Vibrance";
+    case "blackAndWhite":
+      return "Black & White";
     default:
       return "Invert";
   }
@@ -6769,6 +6771,8 @@ export default function App() {
           vibrance,
           saturation: vibranceSaturation,
         };
+      case "blackAndWhite":
+        return { kind: "blackAndWhite" };
       default:
         return { kind: "invert" };
     }
@@ -27768,6 +27772,7 @@ export default function App() {
                 <option value="exposure">Exposure</option>
                 <option value="photoFilter">Photo Filter</option>
                 <option value="vibrance">Vibrance</option>
+                <option value="blackAndWhite">Black &amp; White</option>
               </select>
             </label>
             {adjustmentKind === "vibrance" && (

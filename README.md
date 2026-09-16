@@ -25470,6 +25470,39 @@ delegation. `cargo fmt`/`clippy --all-targets -D warnings`/`test` and
 Tests: 1972 Rust (a fourth case added to the same existing test, count
 unchanged), 46 frontend (unchanged).
 
+## Phase 439 — Adjustment Layer's Black & White
+
+A fifth kind off Adjustment Layer's own documented scope cut, and the
+simplest yet: Black & White has no parameters at all, just a fixed
+BT.601 luma formula, so it needed only a unit `Adjustment` variant, the
+same shape `Invert` already has.
+
+`document.rs`'s `Adjustment` enum gains a plain `BlackAndWhite` variant;
+`apply_adjustment` gains a match arm carrying `black_and_white`'s own
+exact formula (`0.299R + 0.587G + 0.114B`, all three output channels
+set to that luma). The destructive `black_and_white` command is now a
+thin call onto `Adjustment::BlackAndWhite` through `adjust_with`, the
+same refactor the last four phases went through. No `lib.rs` change
+needed.
+
+The frontend's `Adjustment` type gains the matching `blackAndWhite`
+variant (a bare `{ kind: "blackAndWhite" }`, no fields); the Adjustment
+Layer dialog gained a Black & White option in its Adjustment select —
+no new controls needed, since the standalone Black & White command
+never had a dialog either.
+
+Extended `adjustment_layers_match_their_destructive_commands`
+(compiler-enforced exhaustive over `Adjustment` again) with a ninth
+case: Black & White over the suite's own base pixel (200, 100, 50)
+gives luma `0.299*200 + 0.587*100 + 0.114*50 = 124.2`, rounding to 124
+for all three channels. All 7 of `black_and_white`'s own pre-existing
+tests pass unmodified against the refactored delegation. `cargo
+fmt`/`clippy --all-targets -D warnings`/`test` and `npx tsc
+--noEmit`/`npm run build`/`npm test` all clean.
+
+Tests: 1972 Rust (a fifth case added to the same existing test, count
+unchanged), 46 frontend (unchanged).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

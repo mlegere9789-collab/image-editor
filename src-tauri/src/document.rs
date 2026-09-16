@@ -815,6 +815,7 @@ pub enum Adjustment {
         vibrance: i32,
         saturation: i32,
     },
+    BlackAndWhite,
 }
 
 impl Adjustment {
@@ -3930,7 +3931,8 @@ pub enum Fill {
 /// the pixel's own `0.0..=1.0` value; Photo Filter
 /// [`Document::photo_filter`]'s own per-channel lerp toward `color` by
 /// `density`; Vibrance [`Document::vibrance`]'s own saturation-protecting
-/// boost followed by a uniform saturation slider.
+/// boost followed by a uniform saturation slider; Black & White
+/// [`Document::black_and_white`]'s own fixed BT.601 luma weighting.
 pub fn apply_adjustment(adjustment: Adjustment, [r, g, b]: [u8; 3]) -> [u8; 3] {
     match adjustment {
         Adjustment::Invert => [255 - r, 255 - g, 255 - b],
@@ -4020,6 +4022,10 @@ pub fn apply_adjustment(adjustment: Adjustment, [r, g, b]: [u8; 3]) -> [u8; 3] {
             let s = (s * (1.0 + sat_factor)).clamp(0.0, 1.0);
             let (r, g, b) = hsl_to_rgb(h, s, l);
             [r, g, b]
+        }
+        Adjustment::BlackAndWhite => {
+            let luma = to_byte(0.299 * to_unit(r) + 0.587 * to_unit(g) + 0.114 * to_unit(b));
+            [luma, luma, luma]
         }
     }
 }
@@ -25930,12 +25936,12 @@ impl Document {
     /// magentas) for a custom weighting; this uses one fixed, standard
     /// weighting instead — a deliberate scope cut, the same kind Paint
     /// Bucket's fixed tolerance and Posterize's UI-capped slider already
-    /// made in this project, not an oversight.
+    /// made in this project, not an oversight. Now a thin call onto
+    /// [`Adjustment::BlackAndWhite`] through [`Self::adjust_with`] — the
+    /// same formula above, byte for byte, is also what a live Adjustment
+    /// Layer of this kind now applies (`apply_adjustment`).
     pub fn black_and_white(&mut self, id: LayerId) -> Result<Option<Rect>, String> {
-        self.adjust_layer_pixels(id, |[r, g, b, a]| {
-            let luma = to_byte(0.299 * to_unit(r) + 0.587 * to_unit(g) + 0.114 * to_unit(b));
-            [luma, luma, luma, a]
-        })
+        self.adjust_with(id, Adjustment::BlackAndWhite)
     }
 
     /// Image > Adjustments > Vibrance: like [`Self::hue_saturation`]'s
@@ -44750,7 +44756,9 @@ mod tests {
         // saturation 1.0, lightness 125/255 back with hsl_to_rgb (c =
         // 1 - |2*(125/255) - 1| = 50/51, x = c/3 = 50/153, m = l - c/2 =
         // 0 exactly) gives r = 50/51*255 = 250 exactly, g =
-        // 50/153*255 = 250/3 = 83.33... -> 83, b = 0.
+        // 50/153*255 = 250/3 = 83.33... -> 83, b = 0. Black & White's
+        // luma over the base pixel is exactly 124.2 (0.299*200 +
+        // 0.587*100 + 0.114*50), rounding to 124 for all three channels.
         for (adjustment, expected) in [
             (
                 Adjustment::BrightnessContrast {
@@ -44799,6 +44807,7 @@ mod tests {
                 },
                 [250, 83, 0],
             ),
+            (Adjustment::BlackAndWhite, [124, 124, 124]),
         ] {
             let (mut doc, base) = base_pixel();
             doc.add_adjustment_layer("adj", adjustment).unwrap();
@@ -44840,6 +44849,7 @@ mod tests {
                     vibrance,
                     saturation,
                 } => baked.vibrance(baked_id, vibrance, saturation).unwrap(),
+                Adjustment::BlackAndWhite => baked.black_and_white(baked_id).unwrap(),
             };
             assert_eq!(&live[..3], expected, "{adjustment:?}");
             assert_eq!(live, composite_at(&baked, 0), "{adjustment:?}");
