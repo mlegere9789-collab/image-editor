@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cardPlacement, TOUR_STEPS, tourStep } from "./tour.ts";
+import { cardPlacement, TOUR_STEPS, tourStep } from "./tourLogic.ts";
 
 test("the tour has a first and last card without a target and every other step points somewhere", () => {
   assert.ok(TOUR_STEPS.length >= 5);

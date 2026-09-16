@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { cardPlacement, TOUR_STEPS, tourStep } from "./tour";
+import { cardPlacement, TOUR_STEPS, tourStep } from "./tourLogic";
 
 type Props = {
   /** Called when the tour ends, by Done, Skip, or Esc. */

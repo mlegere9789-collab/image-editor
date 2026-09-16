@@ -28,14 +28,14 @@ import {
   PEOPLE_TOOLS,
   TIP_TOOLS,
 } from "./optionsBar";
-import { markTourSeen, tourSeen } from "./tour";
+import { markTourSeen, tourSeen } from "./tourLogic";
 import {
   buildMenuTree,
   commandKey,
   flattenMenuTree,
   MENU_COLORS,
   type MenuColor,
-} from "./menuBar";
+} from "./menuBarLogic";
 import {
   AUTO_CORRECTION_ALGORITHM_LABELS,
   planAutoColorCorrection,

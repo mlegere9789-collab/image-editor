@@ -6,7 +6,7 @@ import {
   type MenuEntry,
   type MenuGroup,
   type MenuItem,
-} from "./menuBar";
+} from "./menuBarLogic";
 
 /**
  * The commands the toolbar carries, read from its buttons: every button

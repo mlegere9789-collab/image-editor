@@ -9,7 +9,7 @@ import {
   menuShortcut,
   type MenuColor,
   type MenuEntry,
-} from "./menuBar.ts";
+} from "./menuBarLogic.ts";
 
 const noop = () => {};
 const entry = (label: string, title: string, disabled = false): MenuEntry => ({
