@@ -7813,25 +7813,29 @@ fn camera_raw_optics(
     id: LayerId,
     distortion: i32,
     vignette: i32,
+    midpoint: i32,
 ) -> Result<Snapshot, String> {
     edit_checkpointed(&state, |document| {
-        document.camera_raw_optics(id, distortion, vignette)
+        document.camera_raw_optics(id, distortion, vignette, midpoint)
     })
 }
 
-/// Filter > Lens Correction on layer `id`: Distortion, Vignette, and
-/// Chromatic Aberration's Fix Red/Cyan Fringe and Fix Blue/Yellow Fringe.
+/// Filter > Lens Correction on layer `id`: Distortion, Vignette (with its
+/// own Midpoint), and Chromatic Aberration's Fix Red/Cyan Fringe and Fix
+/// Blue/Yellow Fringe.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 fn lens_correction(
     state: State<'_, AppState>,
     id: LayerId,
     distortion: i32,
     vignette: i32,
+    midpoint: i32,
     red_cyan: i32,
     blue_yellow: i32,
 ) -> Result<Snapshot, String> {
     edit_checkpointed(&state, |document| {
-        document.lens_correction(id, distortion, vignette, red_cyan, blue_yellow)
+        document.lens_correction(id, distortion, vignette, midpoint, red_cyan, blue_yellow)
     })
 }
 

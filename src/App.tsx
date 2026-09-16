@@ -1581,6 +1581,7 @@ export default function App() {
     useState(false);
   const [lensDistortion, setLensDistortion] = useState(0);
   const [lensVignette, setLensVignette] = useState(0);
+  const [lensMidpoint, setLensMidpoint] = useState(50);
   const [lensRedCyan, setLensRedCyan] = useState(0);
   const [lensBlueYellow, setLensBlueYellow] = useState(0);
   // Filter > Adaptive Wide Angle: one marked line, entered numerically as
@@ -2052,6 +2053,7 @@ export default function App() {
   // Camera Raw Filter > Optics and the Targeted Adjustment Tool.
   const [opticsDistortion, setOpticsDistortion] = useState(0);
   const [opticsVignette, setOpticsVignette] = useState(0);
+  const [opticsMidpoint, setOpticsMidpoint] = useState(50);
   const [targetedMode, setTargetedMode] =
     useState<TargetedMode>("parametricCurve");
   const [targetedPoint, setTargetedPoint] = useState<[number, number]>([0, 0]);
@@ -4098,8 +4100,9 @@ export default function App() {
       id: selectedId,
       distortion: opticsDistortion,
       vignette: opticsVignette,
+      midpoint: opticsMidpoint,
     });
-  }, [runCommand, selectedId, opticsDistortion, opticsVignette]);
+  }, [runCommand, selectedId, opticsDistortion, opticsVignette, opticsMidpoint]);
 
   const applyTargetedAdjustment = useCallback(async () => {
     if (selectedId === null) return;
@@ -4993,6 +4996,7 @@ export default function App() {
       id: selectedId,
       distortion: lensDistortion,
       vignette: lensVignette,
+      midpoint: lensMidpoint,
       redCyan: lensRedCyan,
       blueYellow: lensBlueYellow,
     });
@@ -5002,6 +5006,7 @@ export default function App() {
     selectedId,
     lensDistortion,
     lensVignette,
+    lensMidpoint,
     lensRedCyan,
     lensBlueYellow,
   ]);
@@ -18566,6 +18571,17 @@ export default function App() {
                 }
               />
               <span className="control__value">{opticsVignette}</span>
+              <span className="control__label">Vignette Midpoint</span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={opticsMidpoint}
+                onChange={(event) =>
+                  setOpticsMidpoint(Number(event.target.value))
+                }
+              />
+              <span className="control__value">{opticsMidpoint}</span>
               <button
                 className="button button--quiet"
                 onClick={() => void applyOptics()}
@@ -22826,6 +22842,19 @@ export default function App() {
                 }
               />
               <span className="control__value">{lensVignette}</span>
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Vignette Midpoint</span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={lensMidpoint}
+                onChange={(event) =>
+                  setLensMidpoint(Number(event.target.value))
+                }
+              />
+              <span className="control__value">{lensMidpoint}</span>
             </label>
             <label className="control control--row">
               <span className="control__label">Fix Red/Cyan Fringe</span>

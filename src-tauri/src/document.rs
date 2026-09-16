@@ -28737,24 +28737,42 @@ impl Document {
     /// longer edges, Distortion inverse-maps each pixel to `c + (p − c) ·
     /// (1 + distortion/100 · r²)`, nearest-neighbour, transparent off the
     /// canvas — positive reading from farther out, negative from nearer
-    /// in — and Vignette then scales each colour channel by `1 +
-    /// vignette/100 · r²`, clamped, alpha untouched. A neutral value skips
-    /// its stage, so `0, 0` is the identity; the selection confines both.
-    /// Photoshop's lens-profile corrections, Chromatic Aberration's
-    /// per-channel scaling, and the Vignette's midpoint / roundness /
-    /// feather are documented scope cuts. Errors for a value out of
-    /// range or a locked or unknown layer.
+    /// in. Vignette then scales each colour channel by `1 + vignette/100 ·
+    /// max(0, r² − midpoint_r²)`, clamped — `midpoint` (`0..=100`,
+    /// Photoshop's own real range and default `50`) is Photoshop's own
+    /// real documented control, confirmed directly against Adobe's own
+    /// Camera Raw vignette documentation: a higher midpoint restricts the
+    /// vignette closer to the corners rather than starting right at the
+    /// centre, implemented here as an inner radius (`midpoint_r² =
+    /// (midpoint / 100)²`) the effective radius is measured past, so
+    /// `midpoint = 0` reproduces this project's own previous plain-`r²`
+    /// behaviour exactly (the identity this function's own existing
+    /// callers and tests already rely on). Alpha untouched. A neutral
+    /// vignette or distortion value skips its own stage, so `0, 0, _` is
+    /// the identity; the selection confines both. Photoshop's own
+    /// lens-profile corrections, Chromatic Aberration's per-channel
+    /// scaling, and the Vignette's own Roundness and Feather were not
+    /// found with enough confidently-recalled precision to implement
+    /// honestly (Adobe's own Camera Raw docs describe their real
+    /// semantics — Roundness: circular vs. oval; Feather: softens the
+    /// transition — but not an exact public formula) and remain a
+    /// documented scope cut. Errors for a value out of range or a locked
+    /// or unknown layer.
     pub fn camera_raw_optics(
         &mut self,
         id: LayerId,
         distortion: i32,
         vignette: i32,
+        midpoint: i32,
     ) -> Result<Option<Rect>, String> {
         if !(-100..=100).contains(&distortion) {
             return Err("Optics' Distortion must be between −100 and 100.".to_string());
         }
         if !(-100..=100).contains(&vignette) {
             return Err("Optics' Vignette must be between −100 and 100.".to_string());
+        }
+        if !(0..=100).contains(&midpoint) {
+            return Err("Optics' Vignette Midpoint must be between 0 and 100.".to_string());
         }
         let layer = self.layer(id)?;
         if layer.locked {
@@ -28791,8 +28809,10 @@ impl Document {
         }
         if vignette != 0 {
             let v = vignette as f32 / 100.0;
+            let midpoint_r2 = (midpoint as f32 / 100.0).powi(2);
             touched = self.filter_pixels(id, move |pixels, row, col| {
-                let factor = (1.0 + v * radius_at(col, row)).max(0.0);
+                let effective_r2 = (radius_at(col, row) - midpoint_r2).max(0.0);
+                let factor = (1.0 + v * effective_r2).max(0.0);
                 let base = (row as usize * doc_width + col as usize) * CHANNELS;
                 let mut out = [0u8; CHANNELS];
                 for c in 0..3 {
@@ -28807,24 +28827,27 @@ impl Document {
 
     /// Filter > Lens Correction: Remove Distortion and a Vignette exactly
     /// as [`Self::camera_raw_optics`] applies them (the same radial
-    /// inverse map and per-channel scale, about the canvas centre), plus
-    /// Chromatic Aberration's Fix Red/Cyan Fringe and Fix Blue/Yellow
-    /// Fringe — the red and blue channels each resampled through their
-    /// own radial scale, `1 + k·r²`, while green and alpha stay at the
-    /// destination's own position, so a lens's differential magnification
-    /// of wavelengths pulls a colour fringe back into register. A
-    /// channel whose shifted source falls outside the canvas keeps its
-    /// destination pixel's own byte rather than going transparent, since
-    /// the other channels of that same pixel are untouched and would
-    /// otherwise show through a zeroed one. Lens profiles are a
-    /// documented scope cut, the same as `camera_raw_optics`'s. Errors
-    /// for any of the four amounts outside `-100..=100`, or a locked
-    /// layer.
+    /// inverse map, midpoint-shifted per-channel scale, and canvas
+    /// centre — Photoshop's own real Lens Correction dialog has the same
+    /// Vignette Amount/Midpoint pair Camera Raw's Optics panel does, not
+    /// just an Amount), plus Chromatic Aberration's Fix Red/Cyan Fringe
+    /// and Fix Blue/Yellow Fringe — the red and blue channels each
+    /// resampled through their own radial scale, `1 + k·r²`, while green
+    /// and alpha stay at the destination's own position, so a lens's
+    /// differential magnification of wavelengths pulls a colour fringe
+    /// back into register. A channel whose shifted source falls outside
+    /// the canvas keeps its destination pixel's own byte rather than
+    /// going transparent, since the other channels of that same pixel
+    /// are untouched and would otherwise show through a zeroed one. Lens
+    /// profiles are a documented scope cut, the same as
+    /// `camera_raw_optics`'s. Errors for any of the four amounts outside
+    /// `-100..=100`, `midpoint` outside `0..=100`, or a locked layer.
     pub fn lens_correction(
         &mut self,
         id: LayerId,
         distortion: i32,
         vignette: i32,
+        midpoint: i32,
         red_cyan: i32,
         blue_yellow: i32,
     ) -> Result<Option<Rect>, String> {
@@ -28840,6 +28863,11 @@ impl Document {
                 ));
             }
         }
+        if !(0..=100).contains(&midpoint) {
+            return Err(
+                "Lens Correction's Vignette Midpoint must be between 0 and 100.".to_string(),
+            );
+        }
         let layer = self.layer(id)?;
         if layer.locked {
             return Err(format!("Layer \"{}\" is locked.", layer.name));
@@ -28875,8 +28903,10 @@ impl Document {
         }
         if vignette != 0 {
             let v = vignette as f32 / 100.0;
+            let midpoint_r2 = (midpoint as f32 / 100.0).powi(2);
             touched = self.filter_pixels(id, move |pixels, row, col| {
-                let factor = (1.0 + v * radius_at(col, row)).max(0.0);
+                let effective_r2 = (radius_at(col, row) - midpoint_r2).max(0.0);
+                let factor = (1.0 + v * effective_r2).max(0.0);
                 let base = (row as usize * doc_width + col as usize) * CHANNELS;
                 let mut out = [0u8; CHANNELS];
                 for c in 0..3 {
@@ -29011,7 +29041,7 @@ impl Document {
         lines: &[Vec<(f32, f32)>],
     ) -> Result<Option<Rect>, String> {
         let k = self.adaptive_wide_angle_fit(lines)?;
-        self.lens_correction(id, k, 0, 0, 0)
+        self.lens_correction(id, k, 0, 0, 0, 0)
     }
 
     /// Edit > Transform > Rotate: rotates layer `id`'s pixels by
@@ -68144,35 +68174,69 @@ colorspaces:
         // (x − 2)·(1 + 0.5·r²): the ends read off the canvas (r = 1 →
         // 5 and −1), the next pixels in read 3.125 → 3 and 0.875 → 1.
         let (mut doc, id) = row_5([10, 20, 30, 40, 50]);
-        doc.camera_raw_optics(id, 50, 0).unwrap();
+        doc.camera_raw_optics(id, 50, 0, 0).unwrap();
         assert_eq!(reds_of(&doc, id, 0), vec![0, 20, 30, 40, 0]);
         assert_eq!(pixel(&doc, id, 0, 0)[3], 0);
         assert_eq!(pixel(&doc, id, 1, 0)[3], 255);
         // −50 pulls the ends in: 2 ± 2·0.5 = 3 and 1, 2 ± 0.875 → 3 and 1.
         let (mut doc, id) = row_5([10, 20, 30, 40, 50]);
-        doc.camera_raw_optics(id, -50, 0).unwrap();
+        doc.camera_raw_optics(id, -50, 0, 0).unwrap();
         assert_eq!(reds_of(&doc, id, 0), vec![20, 20, 30, 40, 40]);
         // Neutral settings are the identity.
         let (mut doc, id) = row_5([10, 20, 30, 40, 50]);
-        doc.camera_raw_optics(id, 0, 0).unwrap();
+        doc.camera_raw_optics(id, 0, 0, 0).unwrap();
         assert_eq!(reds_of(&doc, id, 0), vec![10, 20, 30, 40, 50]);
     }
 
     #[test]
     fn camera_raw_optics_vignette_scales_by_one_plus_amount_times_radius_squared() {
+        // Midpoint 0 throughout, reproducing this project's own previous
+        // plain-r² vignette exactly.
         let (mut doc, id) = row_5([200; 5]);
-        doc.camera_raw_optics(id, 0, -100).unwrap();
+        doc.camera_raw_optics(id, 0, -100, 0).unwrap();
         assert_eq!(reds_of(&doc, id, 0), vec![0, 150, 200, 150, 0]);
         let (mut doc, id) = row_5([200; 5]);
-        doc.camera_raw_optics(id, 0, 50).unwrap();
+        doc.camera_raw_optics(id, 0, 50, 0).unwrap();
         assert_eq!(reds_of(&doc, id, 0), vec![255, 225, 200, 225, 255]);
         // Alpha is untouched by the vignette, and the selection confines
         // both corrections.
         assert_eq!(pixel(&doc, id, 0, 0)[3], 255);
         let (mut doc, id) = row_5([200; 5]);
         doc.select_rectangle(0.0, 0.0, 2.0, 1.0).unwrap();
-        doc.camera_raw_optics(id, 0, -100).unwrap();
+        doc.camera_raw_optics(id, 0, -100, 0).unwrap();
         assert_eq!(reds_of(&doc, id, 0), vec![0, 150, 200, 200, 200]);
+    }
+
+    #[test]
+    fn camera_raw_optics_midpoint_restricts_the_vignette_closer_to_the_corners() {
+        // Same 5-wide row (centre index 2, half-span 2), so the five
+        // positions' own r² = nx² are [1, 0.25, 0, 0.25, 1]. Midpoint 50
+        // gives midpoint_r² = 0.5² = 0.25, so effective_r² =
+        // max(0, r² - 0.25) = [0.75, 0, 0, 0, 0.75] -- the two near-edge
+        // midpoints (positions 1 and 3, r² = 0.25) now sit exactly at the
+        // midpoint threshold and are left completely untouched, unlike
+        // the midpoint-0 test above where they darkened to 150. At
+        // vignette -100 (v = -1): factor = 1 + (-1)*effective_r² =
+        // [0.25, 1, 1, 1, 0.25], so 200 -> [50, 200, 200, 200, 50] -- a
+        // real, hand-computed demonstration that a higher midpoint
+        // pushes the vignette's own effect out toward the corners,
+        // matching Photoshop's own documented real behaviour.
+        let (mut doc, id) = row_5([200; 5]);
+        doc.camera_raw_optics(id, 0, -100, 50).unwrap();
+        assert_eq!(reds_of(&doc, id, 0), vec![50, 200, 200, 200, 50]);
+    }
+
+    #[test]
+    fn camera_raw_optics_refuses_a_midpoint_out_of_range() {
+        let (mut doc, id) = row_5([10, 20, 30, 40, 50]);
+        assert!(doc
+            .camera_raw_optics(id, 0, 0, -1)
+            .unwrap_err()
+            .contains("Midpoint"));
+        assert!(doc
+            .camera_raw_optics(id, 0, 0, 101)
+            .unwrap_err()
+            .contains("Midpoint"));
     }
 
     #[test]
@@ -68180,17 +68244,17 @@ colorspaces:
         let (mut doc, id) = row_5([10, 20, 30, 40, 50]);
         let before = doc.layers()[0].pixels.clone();
         assert!(doc
-            .camera_raw_optics(id, 101, 0)
+            .camera_raw_optics(id, 101, 0, 0)
             .unwrap_err()
             .contains("Distortion"));
         assert!(doc
-            .camera_raw_optics(id, 0, -101)
+            .camera_raw_optics(id, 0, -101, 0)
             .unwrap_err()
             .contains("Vignette"));
-        assert!(doc.camera_raw_optics(999, 0, 0).is_err());
+        assert!(doc.camera_raw_optics(999, 0, 0, 0).is_err());
         doc.set_locked(id, true).unwrap();
         assert!(doc
-            .camera_raw_optics(id, 10, 0)
+            .camera_raw_optics(id, 10, 0, 0)
             .unwrap_err()
             .contains("locked"));
         assert!(doc
@@ -71444,7 +71508,7 @@ colorspaces:
         mark(&mut pixels, 7, 4, [222, 50, 60, 255]);
         mark(&mut pixels, 6, 4, [10, 20, 111, 255]);
         let id = doc.add_layer("l", &pixels, 9, 9).unwrap();
-        doc.lens_correction(id, 0, 0, 100, -100).unwrap();
+        doc.lens_correction(id, 0, 0, 0, 100, -100).unwrap();
         // Red comes from (7, 4) = 222; Blue's scale is 0.75, sourcing
         // (round(4 + 2·0.75), 4) = (6, 4), i.e. itself, so Blue stays
         // 111; Green and Alpha are the destination's own, unchanged.
@@ -71461,7 +71525,7 @@ colorspaces:
         let (mut doc, id) = lens_correction_fixture(8, 4, [77, 88, 99, 255]);
         let base = (4 * 9 + 4) * CHANNELS;
         doc.layers[0].pixels[base..base + CHANNELS].copy_from_slice(&[1, 2, 3, 255]);
-        doc.lens_correction(id, 0, 0, 100, -100).unwrap();
+        doc.lens_correction(id, 0, 0, 0, 100, -100).unwrap();
         assert_eq!(pixel(&doc, id, 8, 4), [77, 88, 3, 255]);
     }
 
@@ -71469,8 +71533,17 @@ colorspaces:
     fn lens_correction_distortion_and_vignette_match_camera_raw_optics() {
         let (mut lens, id) = lens_correction_fixture(4, 4, [200, 150, 100, 255]);
         let mut optics = lens.clone();
-        lens.lens_correction(id, 40, -30, 0, 0).unwrap();
-        optics.camera_raw_optics(id, 40, -30).unwrap();
+        lens.lens_correction(id, 40, -30, 0, 0, 0).unwrap();
+        optics.camera_raw_optics(id, 40, -30, 0).unwrap();
+        assert_eq!(lens.layers()[0].pixels, optics.layers()[0].pixels);
+        // The same parity holds with a non-zero Vignette Midpoint too --
+        // lens_correction's own midpoint_r² term is the exact same
+        // formula camera_raw_optics uses, not a separate reimplementation
+        // that happens to agree only at the default.
+        let (mut lens, id) = lens_correction_fixture(4, 4, [200, 150, 100, 255]);
+        let mut optics = lens.clone();
+        lens.lens_correction(id, 0, -60, 70, 0, 0).unwrap();
+        optics.camera_raw_optics(id, 0, -60, 70).unwrap();
         assert_eq!(lens.layers()[0].pixels, optics.layers()[0].pixels);
     }
 
@@ -71484,7 +71557,7 @@ colorspaces:
         // A selection that excludes (6, 4) leaves it untouched even
         // though Red/Cyan would otherwise resample it from (7, 4).
         doc.select_rectangle(0.0, 0.0, 3.0, 3.0).unwrap();
-        doc.lens_correction(id, 0, 0, 100, 0).unwrap();
+        doc.lens_correction(id, 0, 0, 0, 100, 0).unwrap();
         assert_eq!(pixel(&doc, id, 6, 4), [100, 100, 100, 255]);
     }
 
@@ -71493,23 +71566,23 @@ colorspaces:
         let (mut doc, id) = lens_correction_fixture(4, 4, [200, 150, 100, 255]);
         let before = doc.layers()[0].pixels.clone();
         assert!(doc
-            .lens_correction(id, 101, 0, 0, 0)
+            .lens_correction(id, 101, 0, 0, 0, 0)
             .unwrap_err()
             .contains("Distortion"));
         assert!(doc
-            .lens_correction(id, 0, -101, 0, 0)
+            .lens_correction(id, 0, -101, 0, 0, 0)
             .unwrap_err()
             .contains("Vignette"));
         assert!(doc
-            .lens_correction(id, 0, 0, 101, 0)
+            .lens_correction(id, 0, 0, 0, 101, 0)
             .unwrap_err()
             .contains("Red/Cyan"));
         assert!(doc
-            .lens_correction(id, 0, 0, 0, -101)
+            .lens_correction(id, 0, 0, 0, 0, -101)
             .unwrap_err()
             .contains("Blue/Yellow"));
         assert_eq!(doc.layers()[0].pixels, before);
-        assert!(doc.lens_correction(999, 0, 0, 0, 0).is_err());
+        assert!(doc.lens_correction(999, 0, 0, 0, 0, 0).is_err());
     }
 
     #[test]
@@ -71554,7 +71627,7 @@ colorspaces:
         let mut reference = doc.clone();
         let line = vec![(0.54, 13.5475), (10.0, 13.0675), (19.46, 13.5475)];
         doc.adaptive_wide_angle(id, &[line]).unwrap();
-        reference.lens_correction(id, 25, 0, 0, 0).unwrap();
+        reference.lens_correction(id, 25, 0, 0, 0, 0).unwrap();
         assert_eq!(doc.layers()[0].pixels, reference.layers()[0].pixels);
     }
 

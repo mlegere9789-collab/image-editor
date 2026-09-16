@@ -26227,6 +26227,56 @@ Tests: 1988 Rust (1986 → 1988, 1981 lib + 7 pipeline — two new
 added), 51 frontend (unchanged — the new dialog fields are plain
 number inputs, no new frontend-testable logic).
 
+## Phase 456 — Camera Raw Optics and Lens Correction gain a real Vignette Midpoint
+
+Both Optics' and Lens Correction's own Vignette only ever scaled by a
+plain `1 + v·r²`, with no way to control where the effect starts.
+Researched Camera Raw's real documented Vignette behaviour (confirmed
+directly against Adobe's own Camera Raw documentation) and found a
+real, defined control this project didn't have: Midpoint — a higher
+value restricts the vignette closer to the corners rather than
+starting right at the centre. Roundness and Feather were also
+researched, but Adobe's own docs describe only their functional
+semantics (circular vs. oval; a softened transition), not an exact
+public formula, so implementing them with confidently-recalled
+precision wasn't possible — they honestly remain a documented scope
+cut rather than a guessed-at formula.
+
+Both `camera_raw_optics` and `lens_correction` gain a `midpoint:
+i32` (`0..=100`, Photoshop's own real range and default `50`)
+parameter. The vignette factor becomes `1 + v·max(0, r² −
+midpoint_r²)`, where `midpoint_r² = (midpoint / 100)²` — an inner
+radius the effective radius is measured past, so `midpoint = 0`
+reproduces this project's own previous plain-`r²` formula exactly.
+`lens_correction`'s own vignette used a byte-for-byte copy of this same
+formula (its doc comment already claimed exact parity with
+`camera_raw_optics`), so it got the identical change rather than
+drifting out of sync with a doc comment that would otherwise start
+lying. Both dialogs gained a Vignette Midpoint slider, defaulting to
+50 (Photoshop's own real default).
+
+**Verified two ways.** `camera_raw_optics_midpoint_restricts_the_vignette_closer_to_the_corners`
+hand-computes a 5-wide row (centre index 2): at midpoint 50
+(`midpoint_r² = 0.25`), the near-edge positions (`r² = 0.25`) that the
+midpoint-0 test darkens to 150 are now left completely untouched (still
+200), since their own `effective_r² = max(0, 0.25 − 0.25) = 0` — a
+real, hand-verifiable demonstration that a higher midpoint pushes the
+vignette outward. `lens_correction_distortion_and_vignette_match_camera_raw_optics`
+gained a second case at midpoint 70, proving both functions still
+produce byte-identical output with a non-zero midpoint, not just at the
+old default. All 21 existing call sites across both functions were
+updated in place (mechanically, via a small Python script matching
+call syntax rather than by hand) and every existing assertion still
+passes unchanged. `cargo fmt --check`, `cargo clippy --all-targets --
+-D warnings`, `cargo test` (full suite), `npx tsc --noEmit`, and `npm
+run build` all clean.
+
+Tests: 1990 Rust (1988 → 1990, 1983 lib + 7 pipeline — two new
+`#[test]`s: the midpoint test and the out-of-range-midpoint test; the
+existing parity test gained a second case rather than a new function),
+51 frontend (unchanged — the new sliders are plain range inputs, no
+new frontend-testable logic).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
