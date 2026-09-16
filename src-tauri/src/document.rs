@@ -23837,26 +23837,29 @@ impl Document {
     /// the same shared primitive [`box_blur_at`] and [`motion_blur_at`]
     /// already build on, but with a one-sided `0..=length` sample range
     /// instead of either of those two's own symmetric window, which is
-    /// what turns an ordinary blur into a directional streak. A
-    /// documented simplification standing in for Photoshop's own
-    /// tonal-edge-triggered, asymmetric streak renderer, and for its own
-    /// Stagger method's actual staggered offset pattern.
+    /// what turns an ordinary blur into a directional streak. Only
+    /// brightens, never darkens — each channel keeps its own original
+    /// value unless the one-directional average is strictly brighter,
+    /// matching Wind's own well-documented real quirk that it "only
+    /// affects the brighter parts of the image", letting a bright
+    /// background bleed onto a darker subject but never the reverse.
     /// `Document::wind(id, method, direction)`: `method` (`0` Wind, `1`
     /// Blast, `2` Stagger, matching Photoshop's own dialog radio buttons)
     /// selects a `(length, blend)` pair — Wind `(3, 0.6)`, Blast `(8,
     /// 0.9)`, Stagger `(5, 0.75)` — with `blend` the fraction of the
     /// one-directional average mixed into the original,
-    /// `v = orig · (1 − blend) + avg · blend`; `direction` (`0` streaks
-    /// rightward, `1` leftward) picks which neighbour side is averaged.
-    /// `Stagger` additionally offsets every odd row's own sample window
-    /// two pixels further along the streak direction than an even row's
-    /// (`row_offset = 2` added to `t` before applying `direction`,
-    /// `0` on even rows) — a real, if simplified, stand-in for
-    /// Photoshop's own literal staggered offset pattern, rather than the
-    /// plain uniform streak `Wind`/`Blast` still use. Each channel,
-    /// alpha included, is streaked independently. Confined to the
-    /// selection the same way every [`Self::filter_pixels`]-based filter
-    /// already is.
+    /// `v = orig · (1 − blend) + avg · blend` when `avg > orig`, `orig`
+    /// unchanged otherwise; `direction` (`0` streaks rightward, `1`
+    /// leftward) picks which neighbour side is averaged. `Stagger`
+    /// additionally offsets every odd row's own sample window two
+    /// pixels further along the streak direction than an even row's
+    /// (`row_offset = 2` added to `t` before applying `direction`, `0`
+    /// on even rows) — a real, if simplified, stand-in for Photoshop's
+    /// own literal staggered offset pattern, rather than the plain
+    /// uniform streak `Wind`/`Blast` still use. Each channel, alpha
+    /// included, is streaked independently. Confined to the selection
+    /// the same way every [`Self::filter_pixels`]-based filter already
+    /// is.
     pub fn wind(
         &mut self,
         id: LayerId,
@@ -23888,8 +23891,13 @@ impl Document {
             let avg = average_samples(src, doc_width, samples);
             let mut out = [0u8; CHANNELS];
             for c in 0..CHANNELS {
-                let v = src[base + c] as f32 * (1.0 - blend) + avg[c] as f32 * blend;
-                out[c] = v.round().clamp(0.0, 255.0) as u8;
+                let orig = src[base + c];
+                out[c] = if avg[c] > orig {
+                    let v = orig as f32 * (1.0 - blend) + avg[c] as f32 * blend;
+                    v.round().clamp(0.0, 255.0) as u8
+                } else {
+                    orig
+                };
             }
             out
         })
@@ -48791,20 +48799,57 @@ mod tests {
 
     #[test]
     fn wind_direction_flips_which_side_streaks() {
-        // Same method 0 (length 3, blend 0.6), but direction 1 streaks
-        // leftward instead: column 0's own samples are all itself
-        // (edge-clamped), giving a no-op 10, while column 3 now averages
-        // [40, 30, 20, 10] (avg 25) into v = 40*0.4 + 25*0.6 = 31 -- the
-        // mirror image of the rightward test's own row, not a
-        // coincidental match.
-        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
-        let (mut doc, id) = column_stripes_fixture();
+        // Wind only ever brightens (matching its own well-documented
+        // real quirk of only affecting the brighter parts of an image),
+        // so the rightward test's own left-to-right-brightening fixture
+        // (10, 20, 30, 40) can't show direction 1 (leftward) doing
+        // anything -- every leftward neighbour is darker there, so
+        // every pixel's own average never clears its original value and
+        // nothing changes. This test instead uses the mirror-image
+        // fixture (40, 30, 20, 10, brightening right-to-left) so
+        // leftward sampling has somewhere brighter to pull from. Method
+        // 0 (length 3, blend 0.6), direction 1: column 0's own samples
+        // are all itself (edge-clamped, no-op, stays 40); column 1
+        // averages [30, 40, 40, 40] (edge-clamped at column 0) = 37.5 ->
+        // 37 (truncating), brighter than 30, so v = 30*0.4 + 37*0.6 =
+        // 34.2 -> 34; column 2 averages [20, 30, 40, 40] = 32.5 -> 32,
+        // v = 20*0.4 + 32*0.6 = 27.2 -> 27; column 3 averages
+        // [10, 20, 30, 40] = 25, v = 10*0.4 + 25*0.6 = 19 -- exactly the
+        // rightward test's own four values in reverse column order, the
+        // real consequence of mirroring both the fixture and the
+        // direction at once.
+        let width = 4u32;
+        let mut pixels = Vec::with_capacity(width as usize * 4);
+        for col in 0..width {
+            let v = (10 * (width - col)) as u8;
+            pixels.extend_from_slice(&[v, v, v, 255]);
+        }
+        let mut doc = Document::new(width, 1).unwrap();
+        let id = doc.add_layer("stripes", &pixels, width, 1).unwrap();
         doc.wind(id, 0, 1).unwrap();
+        let idx = |x: usize| x * 4;
         let p = &doc.layers()[0].pixels;
-        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [10, 10, 10, 255]);
-        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [15, 15, 15, 255]);
-        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [22, 22, 22, 255]);
-        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [31, 31, 31, 255]);
+        assert_eq!(&p[idx(0)..idx(0) + 4], [40, 40, 40, 255]);
+        assert_eq!(&p[idx(1)..idx(1) + 4], [34, 34, 34, 255]);
+        assert_eq!(&p[idx(2)..idx(2) + 4], [27, 27, 27, 255]);
+        assert_eq!(&p[idx(3)..idx(3) + 4], [19, 19, 19, 255]);
+    }
+
+    #[test]
+    fn wind_never_darkens_only_ever_brightens() {
+        // The real, documented Wind quirk this phase adds: it only ever
+        // affects the brighter parts of an image, so a pixel whose own
+        // one-directional average is darker (or equal) is left
+        // completely untouched, never dimmed toward that average.
+        // Direction 1 (leftward) over the rightward-brightening
+        // column-stripes fixture (10, 20, 30, 40) has nowhere brighter
+        // to sample from at any column -- every leftward neighbour is
+        // darker or, at the very edge, clamped to the same pixel -- so
+        // the entire row is a real, hand-verifiable no-op byte for byte.
+        let (mut doc, id) = column_stripes_fixture();
+        let before = doc.layers()[0].pixels.clone();
+        doc.wind(id, 0, 1).unwrap();
+        assert_eq!(doc.layers()[0].pixels, before);
     }
 
     #[test]

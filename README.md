@@ -26094,6 +26094,50 @@ Tests: 1984 Rust (1980 → 1984, 1977 lib + 7 pipeline — four new
 Bitmap dialog's Method dropdown gained four options, no new
 frontend-testable logic).
 
+## Phase 453 — Wind only brightens, never darkens
+
+Filter > Stylize > Wind blended every pixel toward its own
+one-directional average unconditionally. Researched Wind's actual
+documented real behaviour first (a genuine web search this session)
+and found a specific, well-documented real quirk this project didn't
+have: Wind "only affects the brighter parts of the image" — a bright
+background can bleed its brightness onto a darker subject next to it,
+but a dark background never dims a brighter subject. That's a real,
+testable asymmetry this filter was missing entirely.
+
+The per-channel blend in `wind` now only applies when the
+one-directional average is strictly brighter than the pixel's own
+value; otherwise the pixel is left completely untouched, not partway
+blended toward a darker average. One `if avg[c] > orig` per channel,
+no new parameter, no new function.
+
+This is a genuine behaviour change, not an additive one, so it moved
+the goalposts for the existing `wind_direction_flips_which_side_streaks`
+test: its own fixture brightens left-to-right, so leftward sampling
+never finds anything brighter and the old test's asserted values (15,
+22, 31) are no longer what the filter actually produces — under the
+new, more faithful rule, leftward wind over that particular fixture is
+a genuine no-op. Rather than paper over that, the test was rewritten to
+use the mirror-image fixture (40, 30, 20, 10, brightening
+right-to-left) so leftward sampling has somewhere brighter to pull
+from, landing on the rightward test's own four values in reverse column
+order (34, 27, 19) — the real, hand-computed consequence of mirroring
+both the fixture and the direction at once. A new
+`wind_never_darkens_only_ever_brightens` test asserts the no-op case
+directly: leftward wind over the original rightward-brightening fixture
+leaves every pixel byte-for-byte unchanged. Every other existing Wind
+test (rightward Wind, Blast, Stagger, selection confinement) already
+sampled in the brightening direction and needed no changes at all,
+confirmed by running the full existing suite rather than assuming it.
+
+`cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`,
+`cargo test` (full suite), `npx tsc --noEmit`, and `npm run build` all
+clean.
+
+Tests: 1985 Rust (1984 → 1985, 1978 lib + 7 pipeline — one new
+`#[test]`, `wind_never_darkens_only_ever_brightens`; the direction test
+was rewritten in place, not added), 51 frontend (unchanged).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
