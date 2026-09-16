@@ -25884,6 +25884,45 @@ changed — no backend touched.
 Tests: 1975 Rust (unchanged), 51 frontend (46 → 51, five new
 `protractorAngle` cases).
 
+## Phase 449 — Wind's Stagger method
+
+Filter > Stylize > Wind's Method radio group already picked a real
+`(length, blend)` pair per method (Wind, Blast, Stagger), but Stagger's
+own literal staggered offset pattern — Photoshop actually splits the
+streak into jagged, alternating segments rather than one uniform
+window — was left a documented scope cut, all three methods sharing the
+exact same per-pixel sampling shape. This phase gives Stagger a real,
+if simplified, difference: every odd row's own one-directional sample
+window is offset two pixels further along the streak direction than an
+even row's, so adjacent rows sample different neighbourhoods and the
+streak reads as staggered rather than a flat band.
+
+One new `bool stagger = method == 2` and one new `row_offset` term
+(`2` on odd rows when `stagger`, `0` otherwise, folded into the sample
+loop's own `t` before applying `direction`'s sign) — no new function,
+no new parameter surface, no frontend change at all: the Stagger radio
+button already sent `method: 2`.
+
+**Verified two ways.** `wind_stagger_offsets_odd_rows_further_along_the_streak`
+reuses the existing column-stripes fixture (4×4, every row 10/20/30/40),
+method 2 (length 5, blend 0.75), direction 0 (rightward). Column 0, row
+0 (even, no offset): samples at columns `0,1,2,3,3,3` (edge-clamped) =
+`[10, 20, 30, 40, 40, 40]`, avg `= 180/6 = 30` (truncating, the same
+convention `average_samples` already uses), `v = 10*0.25 + 30*0.75 =
+25.0 → 25`. Column 0, row 1 (odd, `+2` offset): samples at columns
+`2,3,3,3,3,3` = `[30, 40, 40, 40, 40, 40]`, avg `= 230/6 = 38`,
+`v = 10*0.25 + 38*0.75 = 31.0 → 31` — genuinely higher than row 0's own
+25 at the very same column, since the staggered row's window has
+shifted onto brighter columns further along the streak. Row 2 (even
+again) matches row 0's own 25 exactly, confirming the alternation is
+real and periodic, not a one-off fluke. `cargo fmt --check`,
+`cargo clippy --all-targets -- -D warnings`, `cargo test` (full suite),
+and `npm run build` all clean.
+
+Tests: 1976 Rust (1975 → 1976, 1969 lib + 7 pipeline), 51 frontend
+(unchanged — this phase is backend-only, reusing an already-wired
+frontend control).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

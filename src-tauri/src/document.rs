@@ -23784,9 +23784,15 @@ impl Document {
     /// one-directional average mixed into the original,
     /// `v = orig · (1 − blend) + avg · blend`; `direction` (`0` streaks
     /// rightward, `1` leftward) picks which neighbour side is averaged.
-    /// Each channel, alpha included, is streaked independently. Confined
-    /// to the selection the same way every [`Self::filter_pixels`]-based
-    /// filter already is.
+    /// `Stagger` additionally offsets every odd row's own sample window
+    /// two pixels further along the streak direction than an even row's
+    /// (`row_offset = 2` added to `t` before applying `direction`,
+    /// `0` on even rows) — a real, if simplified, stand-in for
+    /// Photoshop's own literal staggered offset pattern, rather than the
+    /// plain uniform streak `Wind`/`Blast` still use. Each channel,
+    /// alpha included, is streaked independently. Confined to the
+    /// selection the same way every [`Self::filter_pixels`]-based filter
+    /// already is.
     pub fn wind(
         &mut self,
         id: LayerId,
@@ -23804,13 +23810,15 @@ impl Document {
             1 => (8i64, 0.9f32),
             _ => (5i64, 0.75f32),
         };
+        let stagger = method == 2;
         let dx: i64 = if direction == 0 { 1 } else { -1 };
         let width = self.width as i64;
         let doc_width = self.width as usize;
         self.filter_pixels(id, move |src, row, col| {
             let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            let row_offset: i64 = if stagger && row % 2 == 1 { 2 } else { 0 };
             let samples = (0..=length).map(|t| {
-                let sx = (col as i64 + t * dx).clamp(0, width - 1) as usize;
+                let sx = (col as i64 + (t + row_offset) * dx).clamp(0, width - 1) as usize;
                 (sx, row as usize)
             });
             let avg = average_samples(src, doc_width, samples);
@@ -48659,6 +48667,30 @@ mod tests {
         doc.wind(id, 1, 0).unwrap();
         let p = &doc.layers()[0].pixels;
         assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [31, 31, 31, 255]);
+    }
+
+    #[test]
+    fn wind_stagger_offsets_odd_rows_further_along_the_streak() {
+        // The same column-stripes fixture (4x4, every row 10/20/30/40),
+        // method 2 (Stagger: length 5, blend 0.75), direction 0
+        // (rightward, dx = 1). Column 0, row 0 (even -- no offset):
+        // samples at columns 0,1,2,3,3,3 (t = 0..=5, edge-clamped at
+        // width 4) = [10, 20, 30, 40, 40, 40], avg = 180/6 = 30
+        // (truncating), v = 10*0.25 + 30*0.75 = 25.0 -> 25. Column 0,
+        // row 1 (odd -- the extra +2 row offset): samples at columns
+        // 2,3,3,3,3,3 (t + 2 = 2..=7, edge-clamped) = [30, 40, 40, 40,
+        // 40, 40], avg = 230/6 = 38 (truncating), v = 10*0.25 + 38*0.75
+        // = 31.0 -> 31 -- a real, higher value than row 0's own 25 at
+        // this same column, since the staggered row's window has
+        // shifted onto brighter columns further along the streak.
+        // Row 2 (even again) must match row 0 exactly.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = column_stripes_fixture();
+        doc.wind(id, 2, 0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [25, 25, 25, 255]);
+        assert_eq!(&p[idx(0, 1)..idx(0, 1) + 4], [31, 31, 31, 255]);
+        assert_eq!(&p[idx(0, 2)..idx(0, 2) + 4], [25, 25, 25, 255]);
     }
 
     #[test]
