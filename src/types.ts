@@ -233,6 +233,15 @@ export type Adjustment =
       kind: "gradientMap";
       shadowColor: [number, number, number];
       highlightColor: [number, number, number];
+    }
+  | {
+      kind: "selectiveColor";
+      range: SelectiveColorRange;
+      cyan: number;
+      magenta: number;
+      yellow: number;
+      black: number;
+      method: SelectiveColorMethod;
     };
 
 /** Mirrors `NeuralFilterKind` in src-tauri/src/document.rs (serde

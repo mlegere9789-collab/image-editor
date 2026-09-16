@@ -653,6 +653,8 @@ function adjustmentKindLabel(kind: Adjustment["kind"]): string {
       return "Channel Mixer";
     case "gradientMap":
       return "Gradient Map";
+    case "selectiveColor":
+      return "Selective Color";
     default:
       return "Invert";
   }
@@ -6785,6 +6787,16 @@ export default function App() {
           shadowColor: hexToRgb(gradientMapShadow),
           highlightColor: hexToRgb(gradientMapHighlight),
         };
+      case "selectiveColor":
+        return {
+          kind: "selectiveColor",
+          range: selectiveColorRange,
+          cyan: selectiveColorCyan,
+          magenta: selectiveColorMagenta,
+          yellow: selectiveColorYellow,
+          black: selectiveColorBlack,
+          method: selectiveColorMethod,
+        };
       default:
         return { kind: "invert" };
     }
@@ -6810,6 +6822,12 @@ export default function App() {
     channelMixerMatrix,
     gradientMapShadow,
     gradientMapHighlight,
+    selectiveColorRange,
+    selectiveColorCyan,
+    selectiveColorMagenta,
+    selectiveColorYellow,
+    selectiveColorBlack,
+    selectiveColorMethod,
   ]);
 
   const addAdjustmentLayer = useCallback(async () => {
@@ -27790,8 +27808,116 @@ export default function App() {
                 <option value="blackAndWhite">Black &amp; White</option>
                 <option value="channelMixer">Channel Mixer</option>
                 <option value="gradientMap">Gradient Map</option>
+                <option value="selectiveColor">Selective Color</option>
               </select>
             </label>
+            {adjustmentKind === "selectiveColor" && (
+              <>
+                <label className="control">
+                  <span className="control__label">Colors</span>
+                  <select
+                    value={selectiveColorRange}
+                    onChange={(event) =>
+                      setSelectiveColorRange(
+                        event.target.value as SelectiveColorRange,
+                      )
+                    }
+                  >
+                    <option value="reds">Reds</option>
+                    <option value="yellows">Yellows</option>
+                    <option value="greens">Greens</option>
+                    <option value="cyans">Cyans</option>
+                    <option value="blues">Blues</option>
+                    <option value="magentas">Magentas</option>
+                    <option value="whites">Whites</option>
+                    <option value="neutrals">Neutrals</option>
+                    <option value="blacks">Blacks</option>
+                  </select>
+                </label>
+                <label className="control">
+                  <span className="control__label">Method</span>
+                  <select
+                    value={selectiveColorMethod}
+                    onChange={(event) =>
+                      setSelectiveColorMethod(
+                        event.target.value as SelectiveColorMethod,
+                      )
+                    }
+                  >
+                    <option value="relative">Relative</option>
+                    <option value="absolute">Absolute</option>
+                  </select>
+                </label>
+                <label className="control">
+                  <span className="control__label">
+                    Cyan
+                    <span className="control__value">
+                      {selectiveColorCyan}%
+                    </span>
+                  </span>
+                  <input
+                    type="range"
+                    min={-100}
+                    max={100}
+                    value={selectiveColorCyan}
+                    onChange={(event) =>
+                      setSelectiveColorCyan(Number(event.target.value))
+                    }
+                  />
+                </label>
+                <label className="control">
+                  <span className="control__label">
+                    Magenta
+                    <span className="control__value">
+                      {selectiveColorMagenta}%
+                    </span>
+                  </span>
+                  <input
+                    type="range"
+                    min={-100}
+                    max={100}
+                    value={selectiveColorMagenta}
+                    onChange={(event) =>
+                      setSelectiveColorMagenta(Number(event.target.value))
+                    }
+                  />
+                </label>
+                <label className="control">
+                  <span className="control__label">
+                    Yellow
+                    <span className="control__value">
+                      {selectiveColorYellow}%
+                    </span>
+                  </span>
+                  <input
+                    type="range"
+                    min={-100}
+                    max={100}
+                    value={selectiveColorYellow}
+                    onChange={(event) =>
+                      setSelectiveColorYellow(Number(event.target.value))
+                    }
+                  />
+                </label>
+                <label className="control">
+                  <span className="control__label">
+                    Black
+                    <span className="control__value">
+                      {selectiveColorBlack}%
+                    </span>
+                  </span>
+                  <input
+                    type="range"
+                    min={-100}
+                    max={100}
+                    value={selectiveColorBlack}
+                    onChange={(event) =>
+                      setSelectiveColorBlack(Number(event.target.value))
+                    }
+                  />
+                </label>
+              </>
+            )}
             {adjustmentKind === "gradientMap" && (
               <>
                 <label className="control control--row">

@@ -823,11 +823,22 @@ pub enum Adjustment {
         shadow_color: [u8; 3],
         highlight_color: [u8; 3],
     },
+    SelectiveColor {
+        range: SelectiveColorRange,
+        cyan: i32,
+        magenta: i32,
+        yellow: i32,
+        black: i32,
+        method: SelectiveColorMethod,
+    },
 }
 
 impl Adjustment {
     /// Photoshop's dialog bounds: a threshold level of `1..=255`, at least
-    /// two posterize levels.
+    /// two posterize levels, and Selective Color's own `-100..=100`
+    /// sliders — the one adjustment kind here that errors on an
+    /// out-of-range slider rather than silently clamping it, exactly as
+    /// [`Document::selective_color_method_with`] always has.
     pub fn validate(self) -> Result<(), String> {
         match self {
             Adjustment::Threshold { level: 0 } => {
@@ -835,6 +846,27 @@ impl Adjustment {
             }
             Adjustment::Posterize { levels } if levels < 2 => {
                 Err("Posterize levels must be at least 2.".to_string())
+            }
+            Adjustment::SelectiveColor {
+                cyan,
+                magenta,
+                yellow,
+                black,
+                ..
+            } => {
+                for (name, value) in [
+                    ("cyan", cyan),
+                    ("magenta", magenta),
+                    ("yellow", yellow),
+                    ("black", black),
+                ] {
+                    if !(-100..=100).contains(&value) {
+                        return Err(format!(
+                            "Selective Color {name} must be between -100 and 100."
+                        ));
+                    }
+                }
+                Ok(())
             }
             _ => Ok(()),
         }
@@ -3942,7 +3974,9 @@ pub enum Fill {
 /// [`Document::black_and_white`]'s own fixed BT.601 luma weighting;
 /// Channel Mixer [`Document::channel_mixer`]'s own per-output-channel
 /// weighted sum of all three input channels plus a constant; Gradient
-/// Map [`Document::gradient_map`]'s own two-colour lerp by luma.
+/// Map [`Document::gradient_map`]'s own two-colour lerp by luma;
+/// Selective Color [`Document::selective_color_method_with`]'s own
+/// range-weighted Relative/Absolute ink-slider blend.
 pub fn apply_adjustment(adjustment: Adjustment, [r, g, b]: [u8; 3]) -> [u8; 3] {
     match adjustment {
         Adjustment::Invert => [255 - r, 255 - g, 255 - b],
@@ -4066,6 +4100,39 @@ pub fn apply_adjustment(adjustment: Adjustment, [r, g, b]: [u8; 3]) -> [u8; 3] {
                 ))
             };
             [map(0), map(1), map(2)]
+        }
+        Adjustment::SelectiveColor {
+            range,
+            cyan,
+            magenta,
+            yellow,
+            black,
+            method,
+        } => {
+            let apply_slider = move |v: f32, slider: i32, weight: f32| -> f32 {
+                match method {
+                    SelectiveColorMethod::Relative => {
+                        if slider >= 0 {
+                            v - weight * slider as f32 / 100.0 * v
+                        } else {
+                            v - weight * slider as f32 / 100.0 * (255.0 - v)
+                        }
+                    }
+                    SelectiveColorMethod::Absolute => v - weight * slider as f32 / 100.0 * 255.0,
+                }
+            };
+            let weight = selective_color_weight(range, r, g, b);
+            let mut rf = apply_slider(r as f32, cyan, weight);
+            let mut gf = apply_slider(g as f32, magenta, weight);
+            let mut bf = apply_slider(b as f32, yellow, weight);
+            rf = apply_slider(rf, black, weight);
+            gf = apply_slider(gf, black, weight);
+            bf = apply_slider(bf, black, weight);
+            [
+                rf.round().clamp(0.0, 255.0) as u8,
+                gf.round().clamp(0.0, 255.0) as u8,
+                bf.round().clamp(0.0, 255.0) as u8,
+            ]
         }
     }
 }
@@ -24318,7 +24385,12 @@ impl Document {
     /// value — Photoshop's own documented difference between the two.
     /// `black` is applied identically to all three already-adjusted
     /// channels by the same method, darkening or lightening them
-    /// together. Alpha untouched.
+    /// together. Alpha untouched. Now a thin call onto
+    /// [`Adjustment::SelectiveColor`] through [`Self::adjust_with`] —
+    /// the same formula above, byte for byte (including the same
+    /// `-100..=100` validation, now in [`Adjustment::validate`]), is
+    /// also what a live Adjustment Layer of this kind now applies
+    /// (`apply_adjustment`).
     #[allow(clippy::too_many_arguments)]
     pub fn selective_color_method_with(
         &mut self,
@@ -24330,45 +24402,17 @@ impl Document {
         black: i32,
         method: SelectiveColorMethod,
     ) -> Result<Option<Rect>, String> {
-        for (name, value) in [
-            ("cyan", cyan),
-            ("magenta", magenta),
-            ("yellow", yellow),
-            ("black", black),
-        ] {
-            if !(-100..=100).contains(&value) {
-                return Err(format!(
-                    "Selective Color {name} must be between -100 and 100."
-                ));
-            }
-        }
-        let apply_slider = move |v: f32, slider: i32, weight: f32| -> f32 {
-            match method {
-                SelectiveColorMethod::Relative => {
-                    if slider >= 0 {
-                        v - weight * slider as f32 / 100.0 * v
-                    } else {
-                        v - weight * slider as f32 / 100.0 * (255.0 - v)
-                    }
-                }
-                SelectiveColorMethod::Absolute => v - weight * slider as f32 / 100.0 * 255.0,
-            }
-        };
-        self.adjust_layer_pixels(id, move |[r, g, b, a]| {
-            let weight = selective_color_weight(range, r, g, b);
-            let mut rf = apply_slider(r as f32, cyan, weight);
-            let mut gf = apply_slider(g as f32, magenta, weight);
-            let mut bf = apply_slider(b as f32, yellow, weight);
-            rf = apply_slider(rf, black, weight);
-            gf = apply_slider(gf, black, weight);
-            bf = apply_slider(bf, black, weight);
-            [
-                rf.round().clamp(0.0, 255.0) as u8,
-                gf.round().clamp(0.0, 255.0) as u8,
-                bf.round().clamp(0.0, 255.0) as u8,
-                a,
-            ]
-        })
+        self.adjust_with(
+            id,
+            Adjustment::SelectiveColor {
+                range,
+                cyan,
+                magenta,
+                yellow,
+                black,
+                method,
+            },
+        )
     }
 
     /// Layer > Layer Style > Stroke, baked in destructively: paints a
@@ -44793,7 +44837,12 @@ mod tests {
         // Gradient Map from (0, 10, 20) to (255, 10, 20) keeps G and B
         // constant at 10 and 20 (lerp between two equal values) and
         // lerps R from 0 to 255 by the base pixel's own luma, 124.2/255
-        // -> to_byte(124.2/255) = 124.
+        // -> to_byte(124.2/255) = 124. Selective Color's Neutrals weight
+        // over the base pixel is 1 - |124.2 - 128|/128 = 1 - 3.8/128 =
+        // 0.9703125 exactly; cyan 100 Absolute subtracts
+        // 0.9703125*255 = 247.4296875 from r (200 - 247.4... is clearly
+        // negative, clamping to 0), while magenta/yellow/black all zero
+        // leave g and b untouched at 100 and 50.
         for (adjustment, expected) in [
             (
                 Adjustment::BrightnessContrast {
@@ -44856,6 +44905,17 @@ mod tests {
                 },
                 [124, 10, 20],
             ),
+            (
+                Adjustment::SelectiveColor {
+                    range: SelectiveColorRange::Neutrals,
+                    cyan: 100,
+                    magenta: 0,
+                    yellow: 0,
+                    black: 0,
+                    method: SelectiveColorMethod::Absolute,
+                },
+                [0, 100, 50],
+            ),
         ] {
             let (mut doc, base) = base_pixel();
             doc.add_adjustment_layer("adj", adjustment).unwrap();
@@ -44906,6 +44966,18 @@ mod tests {
                     highlight_color,
                 } => baked
                     .gradient_map(baked_id, shadow_color, highlight_color)
+                    .unwrap(),
+                Adjustment::SelectiveColor {
+                    range,
+                    cyan,
+                    magenta,
+                    yellow,
+                    black,
+                    method,
+                } => baked
+                    .selective_color_method_with(
+                        baked_id, range, cyan, magenta, yellow, black, method,
+                    )
                     .unwrap(),
             };
             assert_eq!(&live[..3], expected, "{adjustment:?}");

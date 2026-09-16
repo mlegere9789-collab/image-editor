@@ -25577,6 +25577,55 @@ build`/`npm test` all clean.
 Tests: 1972 Rust (a seventh case added to the same existing test, count
 unchanged), 46 frontend (unchanged).
 
+## Phase 442 — Adjustment Layer's Selective Color
+
+An eighth kind off Adjustment Layer's own documented scope cut, and the
+first this session where the destructive command actually erred on an
+out-of-range slider rather than clamping it — the same
+`selective_color_method_with` validation this project built in Phase
+434 for Selective Color's own Absolute method. Everything else about
+it is stateless per-pixel work, so it still fits `Adjustment`.
+
+`document.rs`'s `Adjustment` enum gains a `SelectiveColor { range:
+SelectiveColorRange, cyan: i32, magenta: i32, yellow: i32, black: i32,
+method: SelectiveColorMethod }` variant. Its own `-100..=100` slider
+validation moves into `Adjustment::validate` (already called by
+`adjust_with` before every pixel is touched) as a new match arm, so the
+exact same error strings fire whether the call comes from the
+destructive command or a live Adjustment Layer's own retune.
+`apply_adjustment` gains a match arm carrying
+`selective_color_method_with`'s own exact formula — a colour-range
+membership weight scaling each of the three ink sliders by Relative or
+Absolute, then the same treatment again for Black. The destructive
+`selective_color_method_with` command is now a thin call onto
+`Adjustment::SelectiveColor` through `adjust_with`. No `lib.rs` change
+needed.
+
+The frontend's `Adjustment` type gains the matching `selectiveColor`
+variant, reusing the already-existing `SelectiveColorRange`/
+`SelectiveColorMethod` types from Phases 431/434; the Adjustment Layer
+dialog gained a Selective Color option showing the exact same Colors/
+Method selects and Cyan/Magenta/Yellow/Black sliders the standalone
+Selective Color dialog already has, reusing that dialog's own state
+rather than duplicating it.
+
+Extended `adjustment_layers_match_their_destructive_commands`
+(compiler-enforced exhaustive over `Adjustment` again) with a twelfth
+case: Selective Color's Neutrals weight over the suite's own base pixel
+(luma 124.2) is `1 - |124.2 - 128|/128 = 0.9703125` exactly; cyan 100
+Absolute subtracts `0.9703125 * 255 = 247.4296875` from r (200, clearly
+driving it negative, clamping to 0), while magenta/yellow/black all
+zero leave g and b untouched at 100 and 50 — landing at exactly
+`(0, 100, 50)`. All 10 of `selective_color`'s own pre-existing tests
+pass unmodified against the refactored delegation, including the one
+asserting the exact error strings the moved validation now produces
+from `Adjustment::validate` instead. `cargo fmt`/`clippy --all-targets
+-D warnings`/`test` and `npx tsc --noEmit`/`npm run build`/`npm test`
+all clean.
+
+Tests: 1972 Rust (an eighth case added to the same existing test, count
+unchanged), 46 frontend (unchanged).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
