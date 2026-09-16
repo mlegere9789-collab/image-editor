@@ -26037,6 +26037,63 @@ Tests: 1980 Rust (1977 → 1980, 1973 lib + 7 pipeline — three new
 zigzag test, and `contour_with_curve`'s own error-propagation test), 51
 frontend (unchanged).
 
+## Phase 452 — Bitmap Mode's remaining four Halftone Screen dot shapes
+
+Bitmap Mode's Halftone Screen offered 2 of Photoshop's 6 real named dot
+shapes (Square, Diamond). Researched Photoshop's actual real shape list
+first — confirmed as Round, Diamond, Ellipse, Line, Square, and Cross
+via a genuine web search this session (Photoshop's own Halftone Screen
+dialog documentation and tutorials) — then closed the gap for real: the
+remaining four (Round, Line, Cross, Ellipse), each a real geometric
+definition of that shape rather than a further approximation.
+
+`BitmapMethod` gains four variants, each picking its own distance
+metric in the shared per-cell match: `HalftoneScreenRound` is plain
+Euclidean distance, `sqrt(dx² + dy²)` — literally a circle, the actual
+geometric definition, extending the same "distance metric picks the
+shape" architecture Square (Chebyshev max) and Diamond (Manhattan sum)
+already established. `HalftoneScreenLine` collapses the metric to
+`|dy|` alone, so an entire row of a cell turns on together regardless
+of column — full horizontal bars, matching Line's own defining trait
+(parallel lines, not dots). `HalftoneScreenCross` uses `min(|dx|,
+|dy|)` — the opposite pairing from Square's `max` and Diamond's sum —
+so the shape reaches furthest along each axis and pinches in at the
+diagonals, a real plus/cross. `HalftoneScreenEllipse` reuses Round's
+own Euclidean distance but scales the vertical offset by 1.5× first,
+`sqrt(dx² + (1.5·dy)²)`, producing a genuinely elongated (not merely
+relabelled) dot. Photoshop's own proprietary PostScript-style spot-
+function corner-merging correction for Round (the piecewise
+`1-((1-|x|)²+(1-|y|)²)` refinement used near cell corners at high
+darkness) was not confidently recalled precisely enough to assert as
+fact, so it's honestly left out — this phase's Round is a true circle
+at every tone except the very darkest, where the plain Euclidean model
+diverges slightly from Photoshop's own corner-blending behaviour, noted
+here rather than silently glossed over.
+
+**Verified two ways.** All four new shapes are hand-computed against
+the same 8×8 flat 128-grey fixture and radius (`508/255 =
+1.9921568...`) the existing Square/Diamond tests already use, with the
+key sqrt values for Round and Ellipse independently cross-checked via
+`python3 -c "import math; print(math.sqrt(...))"` — every value landed
+comfortably clear of the radius either way, no rounding-boundary risk.
+Round's dot is Square's own 4×4 block with its four corner pixels cut
+off (an octagon, since `sqrt(4.5) = 2.121` clears the radius while
+`sqrt(2.5) = 1.581` and `sqrt(0.5) = 0.707` stay under it). Line grows
+solid bars across rows 2-5, every column. Cross is white only in the
+cell's four 2×2 corner blocks — reaching *further* than Square along
+each axis, the opposite of Diamond's own smaller dot. Ellipse flattens
+to a 4-wide, 2-tall bar (columns 2-5, rows 3-4 only) rather than
+Round's octagon, since `sqrt(5.3125) = 2.305` (weighted by the 1.5×
+vertical scale) clears the radius at a `(dx, dy) = (0.5, 1.5)` pixel
+Round itself keeps inside its own dot. `cargo fmt --check`, `cargo
+clippy --all-targets -- -D warnings`, `cargo test` (full suite), `npx
+tsc --noEmit`, and `npm run build` all clean.
+
+Tests: 1984 Rust (1980 → 1984, 1977 lib + 7 pipeline — four new
+`#[test]` functions, one per shape), 51 frontend (unchanged — the
+Bitmap dialog's Method dropdown gained four options, no new
+frontend-testable logic).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

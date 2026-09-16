@@ -446,7 +446,11 @@ export type BitmapMethod =
   | "patternDither"
   | "diffusionDither"
   | "halftoneScreen"
-  | "halftoneScreenDiamond";
+  | "halftoneScreenDiamond"
+  | "halftoneScreenRound"
+  | "halftoneScreenLine"
+  | "halftoneScreenCross"
+  | "halftoneScreenEllipse";
 
 /** Mirrors `ContourPreset` in src-tauri/src/document.rs. "custom" is a
  * frontend-only value: it isn't sent to the backend at all, it switches

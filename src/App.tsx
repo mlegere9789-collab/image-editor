@@ -21007,6 +21007,18 @@ export default function App() {
                 <option value="halftoneScreenDiamond">
                   Halftone Screen (Diamond)
                 </option>
+                <option value="halftoneScreenRound">
+                  Halftone Screen (Round)
+                </option>
+                <option value="halftoneScreenLine">
+                  Halftone Screen (Line)
+                </option>
+                <option value="halftoneScreenCross">
+                  Halftone Screen (Cross)
+                </option>
+                <option value="halftoneScreenEllipse">
+                  Halftone Screen (Ellipse)
+                </option>
               </select>
             </label>
             <div className="modal__actions">

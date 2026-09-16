@@ -3744,11 +3744,10 @@ pub enum Palette {
 }
 
 /// Image > Mode > Bitmap's Method: 50% Threshold, Pattern Dither (a 4×4
-/// Bayer matrix), Diffusion Dither (Floyd–Steinberg), Halftone Screen (a
-/// classical amplitude-modulated Square dot screen), or Halftone Screen
-/// Diamond (the same amplitude-modulated screen with a Manhattan rather
-/// than Chebyshev distance metric, standing in for Photoshop's own
-/// Diamond dot shape — see [`Document::convert_mode`]).
+/// Bayer matrix), Diffusion Dither (Floyd–Steinberg), or one of Photoshop's
+/// own six real Halftone Screen dot shapes (Square, Diamond, Round, Line,
+/// Cross, Ellipse) — see [`Document::convert_mode`] for what each one's
+/// own distance metric does to the shared amplitude-modulated screen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub enum BitmapMethod {
@@ -3758,6 +3757,23 @@ pub enum BitmapMethod {
     DiffusionDither,
     HalftoneScreen,
     HalftoneScreenDiamond,
+    /// Photoshop's own "Round" — a classical circular dot, the Euclidean
+    /// distance `sqrt(dx² + dy²)` from the cell's own centre.
+    HalftoneScreenRound,
+    /// Photoshop's own "Line" — parallel horizontal bars rather than
+    /// dots: only the vertical offset `|dy|` matters, so an entire row
+    /// of a cell turns on or off together regardless of column.
+    HalftoneScreenLine,
+    /// Photoshop's own "Cross" — a plus/cross shape: `min(|dx|, |dy|)`,
+    /// the opposite pairing from Square's own `max` and Diamond's own
+    /// sum, so the shape reaches furthest along each axis and pinches
+    /// in on the diagonals.
+    HalftoneScreenCross,
+    /// Photoshop's own "Ellipse" — a dot stretched along one axis: the
+    /// same Euclidean distance `Round` uses, but with the vertical
+    /// offset scaled by 1.5× before squaring, so the resulting dot is
+    /// visibly elongated rather than circular.
+    HalftoneScreenEllipse,
 }
 
 /// The 4×4 Bayer ordered-dither matrix.
@@ -6799,18 +6815,29 @@ impl Document {
                                 }
                             }
                         }
-                        BitmapMethod::HalftoneScreen | BitmapMethod::HalftoneScreenDiamond => {
+                        BitmapMethod::HalftoneScreen
+                        | BitmapMethod::HalftoneScreenDiamond
+                        | BitmapMethod::HalftoneScreenRound
+                        | BitmapMethod::HalftoneScreenLine
+                        | BitmapMethod::HalftoneScreenCross
+                        | BitmapMethod::HalftoneScreenEllipse => {
                             const CELL: f32 = 8.0;
-                            let diamond = matches!(method, BitmapMethod::HalftoneScreenDiamond);
                             for y in 0..height {
                                 for x in 0..width {
                                     let i = y * width + x;
                                     let dx = ((x as f32) % CELL) - (CELL - 1.0) / 2.0;
                                     let dy = ((y as f32) % CELL) - (CELL - 1.0) / 2.0;
-                                    let dist = if diamond {
-                                        dx.abs() + dy.abs()
-                                    } else {
-                                        dx.abs().max(dy.abs())
+                                    let dist = match method {
+                                        BitmapMethod::HalftoneScreenDiamond => dx.abs() + dy.abs(),
+                                        BitmapMethod::HalftoneScreenRound => {
+                                            (dx * dx + dy * dy).sqrt()
+                                        }
+                                        BitmapMethod::HalftoneScreenLine => dy.abs(),
+                                        BitmapMethod::HalftoneScreenCross => dx.abs().min(dy.abs()),
+                                        BitmapMethod::HalftoneScreenEllipse => {
+                                            (dx * dx + (1.5 * dy) * (1.5 * dy)).sqrt()
+                                        }
+                                        _ => dx.abs().max(dy.abs()),
                                     };
                                     let darkness = 1.0 - lumas[i] as f32 / 255.0;
                                     let radius = darkness * (CELL / 2.0);
@@ -61048,6 +61075,117 @@ mod tests {
         for y in 0..8u32 {
             for x in 0..8u32 {
                 let inside_dot = (3..=4).contains(&x) && (3..=4).contains(&y);
+                let expected = if inside_dot { 0 } else { 255 };
+                assert_eq!(pixel(&doc, id, x, y)[0], expected, "({x}, {y})");
+            }
+        }
+    }
+
+    #[test]
+    fn bitmap_halftone_screen_round_rounds_off_the_squares_own_corners() {
+        // Same 8x8 flat 128 grey fixture and radius (1.9921568...) as the
+        // Square and Diamond tests. Round uses plain Euclidean distance,
+        // sqrt(dx^2 + dy^2). Within the Square variant's own inner 4x4
+        // block (columns/rows 2-5, axis distances 0.5 or 1.5), three of
+        // the four combinations stay under the radius exactly as Square's
+        // own test found -- (0.5, 0.5): sqrt(0.5) = 0.707; (1.5, 0.5) or
+        // (0.5, 1.5): sqrt(2.5) = 1.581 -- but the fourth, (1.5, 1.5):
+        // sqrt(4.5) = 2.121, clears the radius (independently confirmed
+        // via `python3 -c "import math; print(math.sqrt(4.5))"` = exactly
+        // 2.1213203435596424, well clear of 1.9921568627450981 either
+        // way, no rounding ambiguity). So Round's dot is Square's own 4x4
+        // block with its four corner pixels (where both axis distances
+        // are 1.5) cut off -- an octagon standing in for the true circle,
+        // a real, hand-verifiable, and visibly different shape from every
+        // other preset here.
+        let mut doc = Document::new(8, 8).unwrap();
+        let id = doc.add_layer("l", &[128; 256], 8, 8).unwrap();
+        doc.convert_mode(ColorMode::Bitmap, Some(BitmapMethod::HalftoneScreenRound))
+            .unwrap();
+        for y in 0..8u32 {
+            for x in 0..8u32 {
+                let in_block = (2..=5).contains(&x) && (2..=5).contains(&y);
+                let is_corner = (x == 2 || x == 5) && (y == 2 || y == 5);
+                let inside_dot = in_block && !is_corner;
+                let expected = if inside_dot { 0 } else { 255 };
+                assert_eq!(pixel(&doc, id, x, y)[0], expected, "({x}, {y})");
+            }
+        }
+    }
+
+    #[test]
+    fn bitmap_halftone_screen_line_grows_full_width_horizontal_bars() {
+        // Same fixture and radius. Line's distance is |dy| alone --
+        // column never matters -- so a whole row turns on together.
+        // |dy| is 0.5 for rows 3-4 and 1.5 for rows 2 and 5 (all under
+        // the 1.9921568... radius, no sqrt or rounding involved at all),
+        // and 2.5 or 3.5 for rows 0, 1, 6, 7 (over it). The result is
+        // solid horizontal bars across rows 2-5, every column, rather
+        // than any kind of dot.
+        let mut doc = Document::new(8, 8).unwrap();
+        let id = doc.add_layer("l", &[128; 256], 8, 8).unwrap();
+        doc.convert_mode(ColorMode::Bitmap, Some(BitmapMethod::HalftoneScreenLine))
+            .unwrap();
+        for y in 0..8u32 {
+            for x in 0..8u32 {
+                let inside_dot = (2..=5).contains(&y);
+                let expected = if inside_dot { 0 } else { 255 };
+                assert_eq!(pixel(&doc, id, x, y)[0], expected, "({x}, {y})");
+            }
+        }
+    }
+
+    #[test]
+    fn bitmap_halftone_screen_cross_reaches_further_along_each_axis_than_square() {
+        // Same fixture and radius. Cross's distance is min(|dx|, |dy|)
+        // -- the opposite pairing from Square's own max and Diamond's
+        // own sum -- so a pixel is inside the dot as soon as *either*
+        // axis distance is small, not only when both are. Both axis
+        // distances only reach "large" (2.5 or 3.5, at or past the
+        // radius) at columns/rows 0, 1, 6, 7; everywhere either the
+        // column or the row is 2-5, at least one axis distance is 0.5
+        // or 1.5 and the pixel is inside. The result is a plus/cross
+        // spanning the whole cell along both axes, white only in its
+        // four 2x2 corner blocks -- reaching further than Square's own
+        // bounded 4x4 dot at this same grey level, not less far like
+        // Diamond's.
+        let mut doc = Document::new(8, 8).unwrap();
+        let id = doc.add_layer("l", &[128; 256], 8, 8).unwrap();
+        doc.convert_mode(ColorMode::Bitmap, Some(BitmapMethod::HalftoneScreenCross))
+            .unwrap();
+        for y in 0..8u32 {
+            for x in 0..8u32 {
+                let both_large = !(2..=5).contains(&x) && !(2..=5).contains(&y);
+                let expected = if both_large { 255 } else { 0 };
+                assert_eq!(pixel(&doc, id, x, y)[0], expected, "({x}, {y})");
+            }
+        }
+    }
+
+    #[test]
+    fn bitmap_halftone_screen_ellipse_flattens_the_round_dot_along_one_axis() {
+        // Same fixture and radius. Ellipse reuses Round's own Euclidean
+        // distance but scales the vertical offset by 1.5x first:
+        // sqrt(dx^2 + (1.5*dy)^2). At (dx, dy) = (0.5, 0.5):
+        // sqrt(0.25 + 0.5625) = sqrt(0.8125) = 0.901, under the radius
+        // (inside); at (1.5, 0.5): sqrt(2.25 + 0.5625) = sqrt(2.8125) =
+        // 1.677, still under (inside); but at (0.5, 1.5):
+        // sqrt(0.25 + 5.0625) = sqrt(5.3125) = 2.305, over the radius
+        // (outside) -- the same (dx, dy) pair Round itself keeps *inside*
+        // (sqrt(2.5) = 1.581), since Round has no axis weighting. All
+        // four values independently confirmed via
+        // `python3 -c "import math; print(math.sqrt(0.8125), math.sqrt(2.8125), math.sqrt(5.3125))"`,
+        // each well clear of 1.9921568627450981 either way. So Ellipse's
+        // dot is a flattened 4-wide, 2-tall bar (columns 2-5, rows 3-4
+        // only) rather than Round's own octagon -- visibly elongated
+        // along the horizontal axis, a real ellipse rather than a circle.
+        let mut doc = Document::new(8, 8).unwrap();
+        let id = doc.add_layer("l", &[128; 256], 8, 8).unwrap();
+        doc.convert_mode(ColorMode::Bitmap, Some(BitmapMethod::HalftoneScreenEllipse))
+            .unwrap();
+        for y in 0..8u32 {
+            for x in 0..8u32 {
+                let inside_dot = (2..=5).contains(&x) && (3..=4).contains(&y);
                 let expected = if inside_dot { 0 } else { 255 };
                 assert_eq!(pixel(&doc, id, x, y)[0], expected, "({x}, {y})");
             }
