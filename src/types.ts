@@ -217,6 +217,12 @@ export type Adjustment =
       hue: number;
       saturation: number;
       lightness: number;
+    }
+  | {
+      kind: "colorBalance";
+      shadows: [number, number, number];
+      midtones: [number, number, number];
+      highlights: [number, number, number];
     };
 
 /** Mirrors `NeuralFilterKind` in src-tauri/src/document.rs (serde

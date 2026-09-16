@@ -25309,6 +25309,52 @@ clean.
 
 Tests: 1972 Rust (1970 → 1972: two new tests), 46 frontend (unchanged).
 
+## Phase 435 — Adjustment Layer's Color Balance
+
+Chipped one kind off Adjustment Layer's own documented scope cut, "the
+remaining adjustment kinds as live layers." Color Balance was a clean
+first pick: it was already a pure per-pixel function with no external
+state (unlike Levels/Curves' own histograms or Match Color's second
+layer), so it slots into `Adjustment`/`apply_adjustment` exactly the way
+Hue/Saturation already does.
+
+`document.rs`'s `Adjustment` enum gains a `ColorBalance { shadows:
+[i32; 3], midtones: [i32; 3], highlights: [i32; 3] }` variant;
+`apply_adjustment` gains a match arm carrying `color_balance`'s own
+exact formula (BT.601 luma split into shadow/midtone/highlight weights
+by two linear ramps summing to 1.0, each range's three per-channel
+sliders blended by those weights and added to the channel byte,
+clamped). The destructive `color_balance` command itself is now a thin
+call onto `Adjustment::ColorBalance` through the existing `adjust_with`
+helper — the same refactor `hue_saturation` and the rest already went
+through — so the live and destructive paths share one formula outright
+rather than merely agreeing by construction. No `lib.rs` change: both
+`add_adjustment_layer` and `set_adjustment` already forward the whole
+`Adjustment` enum as JSON.
+
+The frontend's `Adjustment` type gained the matching `colorBalance`
+variant; the Adjustment Layer dialog gained a "Color Balance" option
+that shows the exact same Shadows/Midtones/Highlights × Cyan-Red/
+Magenta-Green/Yellow-Blue table the standalone Color Balance dialog
+already has, reusing that dialog's own `colorBalanceShadows/Midtones/
+Highlights` state and `setColorBalanceValue` setter rather than
+duplicating either.
+
+Extended the existing `adjustment_layers_match_their_destructive_commands`
+test (whose own `match` over `Adjustment` the compiler now requires
+exhaustive, catching any future adjustment kind that forgets this test)
+with a fifth case: the suite's own base pixel (200, 100, 50, luma 124.2)
+under Color Balance shadows `[100, -100, 100]` — shadow_weight
+`(127 − 124.2) / 127 = 0.0220472...`, highlight_weight 0 — shifts each
+channel by `±2.2047244...`, landing at exactly `(202, 98, 52)`; the
+loop's own live-vs-baked composite equality check covers the rest.
+`color_balance`'s own ten pre-existing tests pass unmodified against the
+refactored delegation. `cargo fmt`/`clippy --all-targets -D warnings`/
+`test` and `npx tsc --noEmit`/`npm run build`/`npm test` all clean.
+
+Tests: 1972 Rust (a case added to an existing test, not a new `#[test]`,
+so the count doesn't move), 46 frontend (unchanged).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

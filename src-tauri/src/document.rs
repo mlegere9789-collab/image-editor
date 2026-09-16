@@ -797,6 +797,11 @@ pub enum Adjustment {
         saturation: i32,
         lightness: i32,
     },
+    ColorBalance {
+        shadows: [i32; 3],
+        midtones: [i32; 3],
+        highlights: [i32; 3],
+    },
 }
 
 impl Adjustment {
@@ -3905,7 +3910,9 @@ pub enum Fill {
 /// BT.601 luma rounds to at least `level`, else black; Posterize each
 /// channel snapped to the nearest of `levels` steps across `0..=255`;
 /// Hue/Saturation [`rgb_to_hsl`]'s own H/S/L shifted by `hue`/`saturation`/
-/// `lightness` and converted back with [`hsl_to_rgb`].
+/// `lightness` and converted back with [`hsl_to_rgb`]; Color Balance
+/// [`Document::color_balance`]'s own luma-weighted shadow/midtone/
+/// highlight blend added directly to each channel.
 pub fn apply_adjustment(adjustment: Adjustment, [r, g, b]: [u8; 3]) -> [u8; 3] {
     match adjustment {
         Adjustment::Invert => [255 - r, 255 - g, 255 - b],
@@ -3945,6 +3952,25 @@ pub fn apply_adjustment(adjustment: Adjustment, [r, g, b]: [u8; 3]) -> [u8; 3] {
             let l = (l + light_offset).clamp(0.0, 1.0);
             let (r, g, b) = hsl_to_rgb(h, s, l);
             [r, g, b]
+        }
+        Adjustment::ColorBalance {
+            shadows,
+            midtones,
+            highlights,
+        } => {
+            let shadows = shadows.map(|v| v.clamp(-100, 100) as f32);
+            let midtones = midtones.map(|v| v.clamp(-100, 100) as f32);
+            let highlights = highlights.map(|v| v.clamp(-100, 100) as f32);
+            let luma = 0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32;
+            let shadow_w = ((127.0 - luma) / 127.0).clamp(0.0, 1.0);
+            let highlight_w = ((luma - 128.0) / 127.0).clamp(0.0, 1.0);
+            let midtone_w = 1.0 - shadow_w - highlight_w;
+            let apply = |v: u8, c: usize| {
+                let shift =
+                    shadow_w * shadows[c] + midtone_w * midtones[c] + highlight_w * highlights[c];
+                (v as f32 + shift).round().clamp(0.0, 255.0) as u8
+            };
+            [apply(r, 0), apply(g, 1), apply(b, 2)]
         }
     }
 }
@@ -26658,7 +26684,12 @@ impl Document {
     /// cyan-red/magenta-green/yellow-blue mapping directly onto
     /// R/G/B) are blended by that pixel's three weights and added
     /// directly to the channel byte, then clamped. No Preserve
-    /// Luminosity. Alpha untouched.
+    /// Luminosity. Alpha untouched. Now a thin call onto
+    /// [`Adjustment::ColorBalance`] through [`Self::adjust_with`] — the
+    /// same formula above, byte for byte, is also what a live Adjustment
+    /// Layer of this kind now applies (`apply_adjustment`), closing that
+    /// adjustment kind's own documented gap on Layer > New Adjustment
+    /// Layer's row.
     pub fn color_balance(
         &mut self,
         id: LayerId,
@@ -26666,21 +26697,14 @@ impl Document {
         midtones: [i32; 3],
         highlights: [i32; 3],
     ) -> Result<Option<Rect>, String> {
-        let shadows = shadows.map(|v| v.clamp(-100, 100) as f32);
-        let midtones = midtones.map(|v| v.clamp(-100, 100) as f32);
-        let highlights = highlights.map(|v| v.clamp(-100, 100) as f32);
-        self.adjust_layer_pixels(id, move |[r, g, b, a]| {
-            let luma = 0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32;
-            let shadow_w = ((127.0 - luma) / 127.0).clamp(0.0, 1.0);
-            let highlight_w = ((luma - 128.0) / 127.0).clamp(0.0, 1.0);
-            let midtone_w = 1.0 - shadow_w - highlight_w;
-            let apply = |v: u8, c: usize| {
-                let shift =
-                    shadow_w * shadows[c] + midtone_w * midtones[c] + highlight_w * highlights[c];
-                (v as f32 + shift).round().clamp(0.0, 255.0) as u8
-            };
-            [apply(r, 0), apply(g, 1), apply(b, 2), a]
-        })
+        self.adjust_with(
+            id,
+            Adjustment::ColorBalance {
+                shadows,
+                midtones,
+                highlights,
+            },
+        )
     }
 
     /// Camera Raw Filter > Highlights/Shadows: [`Self::color_balance`]'s
@@ -44661,7 +44685,12 @@ mod tests {
         // (200, 100, 50) is hue 20°, saturation 0.6, lightness 0.49
         // (Python f32 model); Hue +60/Saturation -50%/Lightness +10% moves
         // it to hue 80°, saturation 0.3, lightness 0.59, converting back to
-        // (161, 182, 119).
+        // (161, 182, 119). That same base pixel's luma, 124.2, gives
+        // shadow_weight = (127 - 124.2) / 127 = 0.0220472... and
+        // highlight_weight 0 (124.2 - 128 is negative, clamped); Color
+        // Balance shadows [100, -100, 100] (midtones/highlights both
+        // zero) shifts each channel by shadow_weight * ±100 =
+        // ±2.2047244..., landing at 202/98/52.
         for (adjustment, expected) in [
             (
                 Adjustment::BrightnessContrast {
@@ -44679,6 +44708,14 @@ mod tests {
                     lightness: 10,
                 },
                 [161, 182, 119],
+            ),
+            (
+                Adjustment::ColorBalance {
+                    shadows: [100, -100, 100],
+                    midtones: [0, 0, 0],
+                    highlights: [0, 0, 0],
+                },
+                [202, 98, 52],
             ),
         ] {
             let (mut doc, base) = base_pixel();
@@ -44701,6 +44738,13 @@ mod tests {
                     lightness,
                 } => baked
                     .hue_saturation(baked_id, hue, saturation, lightness)
+                    .unwrap(),
+                Adjustment::ColorBalance {
+                    shadows,
+                    midtones,
+                    highlights,
+                } => baked
+                    .color_balance(baked_id, shadows, midtones, highlights)
                     .unwrap(),
             };
             assert_eq!(&live[..3], expected, "{adjustment:?}");

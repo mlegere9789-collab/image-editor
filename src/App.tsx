@@ -639,6 +639,8 @@ function adjustmentKindLabel(kind: Adjustment["kind"]): string {
       return "Posterize";
     case "hueSaturation":
       return "Hue/Saturation";
+    case "colorBalance":
+      return "Color Balance";
     default:
       return "Invert";
   }
@@ -6735,6 +6737,13 @@ export default function App() {
           saturation: adjustmentSaturation,
           lightness: adjustmentLightness,
         };
+      case "colorBalance":
+        return {
+          kind: "colorBalance",
+          shadows: colorBalanceShadows as [number, number, number],
+          midtones: colorBalanceMidtones as [number, number, number],
+          highlights: colorBalanceHighlights as [number, number, number],
+        };
       default:
         return { kind: "invert" };
     }
@@ -6747,6 +6756,9 @@ export default function App() {
     adjustmentHue,
     adjustmentSaturation,
     adjustmentLightness,
+    colorBalanceShadows,
+    colorBalanceMidtones,
+    colorBalanceHighlights,
   ]);
 
   const addAdjustmentLayer = useCallback(async () => {
@@ -27720,8 +27732,59 @@ export default function App() {
                 <option value="threshold">Threshold</option>
                 <option value="posterize">Posterize</option>
                 <option value="hueSaturation">Hue/Saturation</option>
+                <option value="colorBalance">Color Balance</option>
               </select>
             </label>
+            {adjustmentKind === "colorBalance" && (
+              <table className="channel-mixer">
+                <thead>
+                  <tr>
+                    <th />
+                    <th>Cyan↔Red</th>
+                    <th>Magenta↔Green</th>
+                    <th>Yellow↔Blue</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(
+                    [
+                      ["Shadows", colorBalanceShadows, setColorBalanceShadows],
+                      [
+                        "Midtones",
+                        colorBalanceMidtones,
+                        setColorBalanceMidtones,
+                      ],
+                      [
+                        "Highlights",
+                        colorBalanceHighlights,
+                        setColorBalanceHighlights,
+                      ],
+                    ] as const
+                  ).map(([label, values, setter]) => (
+                    <tr key={label}>
+                      <th>{label}</th>
+                      {values.map((value, index) => (
+                        <td key={index}>
+                          <input
+                            type="number"
+                            min={-100}
+                            max={100}
+                            value={value}
+                            onChange={(event) =>
+                              setColorBalanceValue(
+                                setter,
+                                index,
+                                Number(event.target.value),
+                              )
+                            }
+                          />
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
             {adjustmentKind === "brightnessContrast" && (
               <>
                 <label className="control">
