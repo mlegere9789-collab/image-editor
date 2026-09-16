@@ -25846,6 +25846,44 @@ Tests: 1975 Rust (1974 → 1975, 1968 lib + 7 pipeline — only one new
 function), 46 frontend (unchanged — this phase is backend-plus-dropdown
 only, no new frontend-testable logic).
 
+## Phase 448 — Ruler Tool's protractor second leg
+
+The Ruler Tool read out width, height, distance, and angle for a single
+drag, with Photoshop's own protractor — Alt-drag a second leg from the
+first line's endpoint to read the angle *between* the two legs — a
+documented scope cut. This phase closes it, purely on the frontend: no
+new Rust, since `ruler_measure` already computes exactly the angle a
+second leg needs, called the same way a plain drag already calls it.
+
+`rulerLastLeg` (a ref) remembers the endpoint and angle of the last
+measured line. On pointer-up, if the drag ends with Alt held and a
+previous leg exists, the drag's own start point is discarded and
+`ruler_measure` is called from that remembered endpoint (the pivot)
+to the new drag's end instead — an ordinary plain drag otherwise. A new
+pure `protractorAngle(firstLegAngle, secondLegAngle)` in
+`src/rulerProtractor.ts` then reduces the two legs' own `measure()`
+angles to the interior angle a protractor actually shows: the absolute
+difference mod 360, folded to the shorter arc when that exceeds 180.
+The status bar's existing Ruler readout gains a "∠ N.N°" suffix
+whenever a protractor angle is present, and both the toolbar tooltip
+and the readout's own title mention the new Alt-drag.
+
+**Verified two ways.** Five new `node:test` cases in
+`rulerProtractor.test.ts` hand-check `protractorAngle`: equal angles
+give `0`; a horizontal first leg (`0°`) and a vertical second leg
+(`90°`) give exactly `90`; `10°` and `350°` are `340` apart the long
+way around but `20` the short way, the value an actual protractor
+would show; the function is symmetric in its two arguments
+(`protractorAngle(200, 340) === protractorAngle(340, 200) === 140`);
+and two legs exactly opposite (`45°` and `225°`) read out as a straight
+`180`. `npx tsc --noEmit`, `npm run build`, and `npm test` (51/51,
+46 existing + 5 new) all clean; `git status` confirms only
+`src/App.tsx` (wiring) and the two new `src/rulerProtractor*.ts` files
+changed — no backend touched.
+
+Tests: 1975 Rust (unchanged), 51 frontend (46 → 51, five new
+`protractorAngle` cases).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

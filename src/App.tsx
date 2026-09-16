@@ -11,6 +11,7 @@ import DockZoneSplitter from "./DockZoneSplitter";
 import MenuBar, { toolbarEntries } from "./MenuBar";
 import Tour from "./Tour";
 import { documentPoint, percentOf, pixelDistance, ringStyle } from "./blurPins";
+import { protractorAngle } from "./rulerProtractor";
 import { nextCloneOffset } from "./cloneStamp";
 import {
   angleAt,
@@ -1335,6 +1336,17 @@ export default function App() {
   const pendingAnchorIndex = useRef<number | null>(null);
   const [rulerReadout, setRulerReadout] = useState<Measurement | null>(null);
   const rulerStart = useRef<[number, number] | null>(null);
+  // The Ruler tool's own protractor: Alt-drag from the endpoint of the
+  // last measured line to add a second leg, read out as the interior
+  // angle between the two legs rather than either leg's own angle from
+  // horizontal. `rulerLastLeg` remembers that endpoint and angle so the
+  // next Alt-drag knows where to pivot from.
+  const rulerLastLeg = useRef<{ x: number; y: number; angle: number } | null>(
+    null,
+  );
+  const [rulerProtractorAngle, setRulerProtractorAngle] = useState<
+    number | null
+  >(null);
   const moveStart = useRef<[number, number] | null>(null);
   // Clone Stamp: the Alt-clicked sampling point, and the offset from the
   // first stroke point to it, kept across strokes when Aligned (Photoshop's
@@ -11808,13 +11820,22 @@ export default function App() {
         rulerStart.current = null;
         if (start && document) {
           const [x1, y1] = toDocPoint(event, document);
-          void invoke<Measurement>("ruler_measure", {
-            x0: start[0],
-            y0: start[1],
-            x1,
-            y1,
-          })
-            .then(setRulerReadout)
+          // Alt-drag from the last measured line's own endpoint adds a
+          // second leg, pivoting from that endpoint rather than this
+          // drag's own start point -- Photoshop's own protractor.
+          const pivot =
+            event.altKey && rulerLastLeg.current ? rulerLastLeg.current : null;
+          const [x0, y0] = pivot ? [pivot.x, pivot.y] : start;
+          void invoke<Measurement>("ruler_measure", { x0, y0, x1, y1 })
+            .then((measurement) => {
+              setRulerReadout(measurement);
+              setRulerProtractorAngle(
+                pivot
+                  ? protractorAngle(pivot.angle, measurement.angle)
+                  : null,
+              );
+              rulerLastLeg.current = { x: x1, y: y1, angle: measurement.angle };
+            })
             .catch((err) => setError(String(err)));
         }
         return;
@@ -38079,7 +38100,7 @@ export default function App() {
             onClick={() => setTool("ruler")}
             data-tool="ruler"
             data-tooltip-name="Ruler"
-            data-tooltip="Ruler: drag to measure width, height, distance, and angle (shown in the status bar)"
+            data-tooltip="Ruler: drag to measure width, height, distance, and angle (shown in the status bar). Alt-drag from the line's own endpoint to add a second leg and read the angle between them."
           >
             Ruler
           </button>
@@ -39498,12 +39519,15 @@ export default function App() {
             {rulerReadout && (
               <span
                 className="statusbar__levels"
-                title="Ruler: the last measured drag (angle counter-clockwise from horizontal)"
+                title="Ruler: the last measured drag (angle counter-clockwise from horizontal). Alt-drag from this line's endpoint to add a second leg and read the angle between them."
               >
                 W {rulerReadout.width.toFixed(1)} H{" "}
                 {rulerReadout.height.toFixed(1)} D{" "}
                 {rulerReadout.distance.toFixed(1)} A{" "}
                 {rulerReadout.angle.toFixed(1)}°
+                {rulerProtractorAngle !== null && (
+                  <> ∠ {rulerProtractorAngle.toFixed(1)}°</>
+                )}
               </span>
             )}
             {document.countMarks.length > 0 && (
