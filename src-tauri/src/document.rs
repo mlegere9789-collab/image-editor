@@ -4207,6 +4207,34 @@ pub enum ContourPreset {
     Linear,
     RingDouble,
     Step,
+    /// Rises to full height by the midpoint and holds there — Photoshop's
+    /// own Cone: a fast attack, no decay.
+    Cone,
+    /// The mirror of `Cone`: flat until the midpoint, then a fast rise —
+    /// Photoshop's own Cone - Inverted.
+    ConeInverted,
+    /// A narrow single peak at the midpoint, zero outside its own inner
+    /// quarter-to-three-quarter band — a tighter, steeper `Ring`,
+    /// standing in for Photoshop's own Gaussian.
+    Gaussian,
+    /// An asymmetric single peak at one third of the way in rather than
+    /// `Ring`'s own midpoint — Photoshop's own Ring - Triangle.
+    RingTriangle,
+    /// A sawtooth ramp repeating twice across the size — Photoshop's own
+    /// Sawtooth 1.
+    SawtoothOne,
+    /// The same sawtooth ramp repeating four times — Photoshop's own
+    /// Sawtooth 2.
+    SawtoothTwo,
+    /// The plain descending mirror of `Linear` — Photoshop's own Rolling
+    /// Slope - Descending.
+    RollingSlopeDescending,
+    /// A wide flat plateau at full height with a quarter-width ramp on
+    /// each side — Photoshop's own Half Round.
+    HalfRound,
+    /// The same flat-plateau shape as `HalfRound` but with a narrower,
+    /// steeper ramp on each side — Photoshop's own Cylinder.
+    Cylinder,
 }
 
 /// A ruler guide: a horizontal line at `position` pixels down from the
@@ -25619,6 +25647,95 @@ impl Document {
         strength: u32,
         preset: ContourPreset,
     ) -> Result<Option<Rect>, String> {
+        let radius = size as i64;
+        let ring = move |h: i64| match preset {
+            ContourPreset::Ring => radius - (2 * h - radius).abs(),
+            ContourPreset::Linear => h,
+            ContourPreset::RingDouble => {
+                let half = (radius / 2).max(1);
+                half - (2 * (h % half) - half).abs()
+            }
+            ContourPreset::Step => {
+                if 2 * h >= radius {
+                    radius
+                } else {
+                    0
+                }
+            }
+            ContourPreset::Cone => (2 * h).min(radius),
+            ContourPreset::ConeInverted => (2 * h - radius).max(0),
+            ContourPreset::Gaussian => (radius - 4 * (h - radius / 2).abs()).max(0),
+            ContourPreset::RingTriangle => {
+                if 3 * h < radius {
+                    3 * h
+                } else {
+                    (3 * (radius - h)) / 2
+                }
+            }
+            ContourPreset::SawtoothOne => (h % (radius / 2).max(1)) * 2,
+            ContourPreset::SawtoothTwo => (h % (radius / 4).max(1)) * 4,
+            ContourPreset::RollingSlopeDescending => radius - h,
+            ContourPreset::HalfRound => (4 * h).min(radius).min(4 * (radius - h)),
+            ContourPreset::Cylinder => (8 * h).min(radius).min(8 * (radius - h)),
+        };
+        self.contour_shaded(id, size, light_direction, strength, ring)
+    }
+
+    /// [`Self::contour_with`] with an arbitrary hand-drawn curve instead
+    /// of a named preset — Photoshop's own Contour Editor, letting a user
+    /// draw any shape rather than choosing from the list. `points` are
+    /// five output heights (`0..=size` is the natural range, though nothing
+    /// clamps a caller to it) at the five fixed input positions `[0, size/4,
+    /// size/2, 3*size/4, size]`, joined by [`curve_lookup`]'s own straight
+    /// segments — the exact same five-fixed-x-position shape the Curves
+    /// adjustment and Duotone's own per-ink curves already use, reusing
+    /// `curve_lookup` directly rather than a second interpolation
+    /// implementation. `size` must be at least 4 so those five positions
+    /// are five genuinely distinct integers rather than colliding under
+    /// integer division (a `size` of 1, 2, or 3 only has 2-4 distinct
+    /// integers in `0..=size` to place five points on).
+    pub fn contour_with_curve(
+        &mut self,
+        id: LayerId,
+        size: u32,
+        light_direction: u32,
+        strength: u32,
+        points: [u8; 5],
+    ) -> Result<Option<Rect>, String> {
+        if !(4..=250).contains(&size) {
+            return Err(
+                "Contour size must be between 4 and 250 to use a custom curve.".to_string(),
+            );
+        }
+        let radius = size as i64;
+        let xs = [
+            0u8,
+            (radius / 4) as u8,
+            (radius / 2) as u8,
+            (3 * radius / 4) as u8,
+            size as u8,
+        ];
+        let nodes: Vec<(u8, u8)> = xs.iter().copied().zip(points).collect();
+        let lut = curve_lookup(&nodes)?;
+        let ring = move |h: i64| lut[h.clamp(0, 255) as usize] as i64;
+        self.contour_shaded(id, size, light_direction, strength, ring)
+    }
+
+    /// The shared per-pixel shading body [`Self::contour_with`] and
+    /// [`Self::contour_with_curve`] both drive, parameterised only by
+    /// `ring`, the raw-height-to-shading-weight curve each one builds in
+    /// its own way (a named preset formula, or an arbitrary hand-drawn
+    /// curve). Everything else — validation, the light-direction sample
+    /// offsets, the `toward`/`away` height sampling, and the final
+    /// blend — is identical between the two callers.
+    fn contour_shaded(
+        &mut self,
+        id: LayerId,
+        size: u32,
+        light_direction: u32,
+        strength: u32,
+        ring: impl Fn(i64) -> i64 + 'static,
+    ) -> Result<Option<Rect>, String> {
         if !(1..=250).contains(&size) {
             return Err("Contour size must be between 1 and 250.".to_string());
         }
@@ -25645,21 +25762,6 @@ impl Document {
         let dx = cos.round() as i64;
         let dy = -(sin.round() as i64);
         let amount = strength as f32 / 100.0;
-        let ring = move |h: i64| match preset {
-            ContourPreset::Ring => radius - (2 * h - radius).abs(),
-            ContourPreset::Linear => h,
-            ContourPreset::RingDouble => {
-                let half = (radius / 2).max(1);
-                half - (2 * (h % half) - half).abs()
-            }
-            ContourPreset::Step => {
-                if 2 * h >= radius {
-                    radius
-                } else {
-                    0
-                }
-            }
-        };
         self.filter_pixels(id, move |src, row, col| {
             let base = (row as usize * doc_width + col as usize) * CHANNELS;
             if src[base + 3] == 0 {
@@ -31678,6 +31780,21 @@ fn gloss_curve(preset: ContourPreset, x: f32) -> f32 {
                 0.0
             }
         }
+        ContourPreset::Cone => (2.0 * x).min(1.0),
+        ContourPreset::ConeInverted => (2.0 * x - 1.0).max(0.0),
+        ContourPreset::Gaussian => (1.0 - 4.0 * (x - 0.5).abs()).max(0.0),
+        ContourPreset::RingTriangle => {
+            if x < 1.0 / 3.0 {
+                3.0 * x
+            } else {
+                1.5 * (1.0 - x)
+            }
+        }
+        ContourPreset::SawtoothOne => 2.0 * x - (2.0 * x).floor(),
+        ContourPreset::SawtoothTwo => 4.0 * x - (4.0 * x).floor(),
+        ContourPreset::RollingSlopeDescending => 1.0 - x,
+        ContourPreset::HalfRound => (4.0 * x).min(1.0).min(4.0 * (1.0 - x)),
+        ContourPreset::Cylinder => (8.0 * x).min(1.0).min(8.0 * (1.0 - x)),
     }
 }
 
@@ -53428,6 +53545,138 @@ mod tests {
         let idx = |x: usize, y: usize| (y * width as usize + x) * 4;
         let p = &doc.layers()[0].pixels;
         assert_eq!(&p[idx(9, 1)..idx(9, 1) + 4], [96, 146, 196, 255]);
+    }
+
+    fn contour_strip_fixture() -> (Document, LayerId) {
+        // The same wide opaque strip (columns 5-24 of a 40-wide, 3-tall
+        // layer) `contour_with_ring_double_rings_twice_across_the_same_size`
+        // already uses, factored out so the new-preset test below can
+        // build several documents from it without repeating the pixel
+        // buffer construction. `height(c) = min(c - 4, 25 - c)` for any
+        // opaque column `c` (5..=24), capped at whatever radius a given
+        // test passes to `bevel_height_at`.
+        let width = 40u32;
+        let mut pixels = Vec::with_capacity(width as usize * 3 * 4);
+        for _row in 0..3u32 {
+            for col in 0..width {
+                if (5..=24).contains(&col) {
+                    pixels.extend_from_slice(&[100, 150, 200, 255]);
+                } else {
+                    pixels.extend_from_slice(&[0, 0, 0, 0]);
+                }
+            }
+        }
+        let mut doc = Document::new(width, 3).unwrap();
+        let id = doc.add_layer("strip", &pixels, width, 3).unwrap();
+        (doc, id)
+    }
+
+    #[test]
+    fn contour_with_new_named_presets_match_their_own_hand_computed_shading() {
+        // The strip fixture's own height(c) = min(c - 4, 25 - c) for
+        // opaque columns 5..=24, with radius 12 throughout and direction
+        // 2 (dx=1, dy=0) so `toward = height(col+1)`, `away = height(col-1)`.
+        // Three sample points, chosen so each new preset lands on a
+        // genuinely different, hand-computable part of its own curve:
+        //   pixel col 6:  toward = height(7) = 3,  away = height(5) = 1
+        //   pixel col 11: toward = height(12) = 8, away = height(10) = 6
+        //   pixel col 13: toward = height(14) = 10, away = height(12) = 8
+        // Every relief/shade/output below is computed directly from
+        // each preset's own formula in `contour_with`'s `ring` closure
+        // against these three (toward, away) pairs, strength 100
+        // (amount = 1.0) throughout, from the fixture's own base pixel
+        // (100, 150, 200).
+        let idx = |x: usize, y: usize| (y * 40 + x) * 4;
+        let cases: [(u32, ContourPreset, [u8; 4]); 8] = [
+            // col 6: toward=3, away=1.
+            // Cone: min(2h,12) -> cone(3)=6, cone(1)=2. relief=2-6=-4.
+            (6, ContourPreset::Cone, [96, 146, 196, 255]),
+            // Cylinder: min(8h,12,8(12-h)) -> cyl(3)=min(24,12,72)=12,
+            // cyl(1)=min(8,12,88)=8. relief=8-12=-4.
+            (6, ContourPreset::Cylinder, [96, 146, 196, 255]),
+            // col 11: toward=8, away=6.
+            // ConeInverted: max(0,2h-12) -> ci(8)=4, ci(6)=0. relief=0-4=-4.
+            (11, ContourPreset::ConeInverted, [96, 146, 196, 255]),
+            // Gaussian: max(0,12-4|h-6|) -> g(8)=4, g(6)=12. relief=12-4=8.
+            (11, ContourPreset::Gaussian, [108, 158, 208, 255]),
+            // RingTriangle: h<4 ? 3h : 3(12-h)/2 -> rt(8)=6, rt(6)=9.
+            // relief=9-6=3.
+            (11, ContourPreset::RingTriangle, [103, 153, 203, 255]),
+            // SawtoothOne: (h%6)*2 -> so(8)=(8%6)*2=4, so(6)=(6%6)*2=0.
+            // relief=0-4=-4.
+            (11, ContourPreset::SawtoothOne, [96, 146, 196, 255]),
+            // SawtoothTwo: (h%3)*4 -> st(8)=(8%3)*4=8, st(6)=(6%3)*4=0.
+            // relief=0-8=-8.
+            (11, ContourPreset::SawtoothTwo, [92, 142, 192, 255]),
+            // RollingSlopeDescending: 12-h -> rsd(8)=4, rsd(6)=6.
+            // relief=6-4=2.
+            (
+                11,
+                ContourPreset::RollingSlopeDescending,
+                [102, 152, 202, 255],
+            ),
+        ];
+        for (col, preset, expected) in cases {
+            let (mut doc, id) = contour_strip_fixture();
+            doc.contour_with(id, 12, 2, 100, preset).unwrap();
+            let p = &doc.layers()[0].pixels;
+            assert_eq!(
+                &p[idx(col as usize, 1)..idx(col as usize, 1) + 4],
+                expected,
+                "{preset:?} at column {col}"
+            );
+        }
+        // col 13: toward=height(14)=10, away=height(12)=8.
+        // HalfRound: min(4h,12,4(12-h)) -> hr(10)=min(40,12,8)=8,
+        // hr(8)=min(32,12,16)=12. relief=12-8=4.
+        let (mut doc, id) = contour_strip_fixture();
+        doc.contour_with(id, 12, 2, 100, ContourPreset::HalfRound)
+            .unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(13, 1)..idx(13, 1) + 4], [104, 154, 204, 255]);
+    }
+
+    #[test]
+    fn contour_with_curve_reproduces_an_arbitrary_hand_drawn_zigzag() {
+        // The same strip fixture, radius 8 (so the five fixed input
+        // positions are exactly [0, 2, 4, 6, 8]), direction 2 (dx=1,
+        // dy=0): pixel col 9 has toward = height(10) = min(8, 6, 15) = 6
+        // and away = height(8) = min(8, 4, 17) = 4 -- both landing
+        // exactly on two of the curve's own five fixed input positions,
+        // so no interpolation rounding is involved anywhere in this
+        // test. A hand-drawn zigzag curve, points = [0, 8, 0, 8, 0] at
+        // inputs [0, 2, 4, 6, 8], reads out curve(6) = 8 (the fourth
+        // point) and curve(4) = 0 (the third point) directly -- not a
+        // preset shape at all, proving genuinely arbitrary hand-drawn
+        // curves work, not just the named list above. relief =
+        // curve(away) - curve(toward) = 0 - 8 = -8, shade = -8 at
+        // strength 100, giving (92, 142, 192) from the fixture's own
+        // (100, 150, 200).
+        let idx = |x: usize, y: usize| (y * 40 + x) * 4;
+        let (mut doc, id) = contour_strip_fixture();
+        doc.contour_with_curve(id, 8, 2, 100, [0, 8, 0, 8, 0])
+            .unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(9, 1)..idx(9, 1) + 4], [92, 142, 192, 255]);
+    }
+
+    #[test]
+    fn contour_with_curve_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        // Too small for five distinct fixed input positions (0..=3 only
+        // has 4 integers to place them on).
+        assert!(doc
+            .contour_with_curve(id, 3, 0, 100, [0, 64, 128, 192, 255])
+            .is_err());
+        assert!(doc
+            .contour_with_curve(id, 251, 0, 100, [0, 64, 128, 192, 255])
+            .is_err());
+        assert!(doc
+            .contour_with_curve(id, 4, 8, 100, [0, 64, 128, 192, 255])
+            .is_err());
+        assert!(doc
+            .contour_with_curve(id, 4, 0, 101, [0, 64, 128, 192, 255])
+            .is_err());
     }
 
     #[test]

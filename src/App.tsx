@@ -85,6 +85,7 @@ import type {
   ContentAwareScaleOptions,
   ContentCredentialsAction,
   ContentCredentialsManifest,
+  ContourPreset,
   ConversionEngine,
   IccProfile,
   DocumentView,
@@ -2200,15 +2201,16 @@ export default function App() {
   const [bevelShadowBlendMode, setBevelShadowBlendMode] =
     useState<BlendMode>("multiply");
   const [bevelGlossContour, setBevelGlossContour] = useState<
-    "ring" | "linear" | "ringDouble" | "step"
+    Exclude<ContourPreset, "custom">
   >("linear");
   const [showContourDialog, setShowContourDialog] = useState(false);
   const [contourSize, setContourSize] = useState(5);
   const [contourLightDirection, setContourLightDirection] = useState(7);
   const [contourStrength, setContourStrength] = useState(50);
-  const [contourPreset, setContourPreset] = useState<
-    "ring" | "linear" | "ringDouble" | "step"
-  >("ring");
+  const [contourPreset, setContourPreset] = useState<ContourPreset>("ring");
+  const [contourCurve, setContourCurve] = useState<
+    [number, number, number, number, number]
+  >([0, 64, 128, 192, 255]);
   const [showTextureDialog, setShowTextureDialog] = useState(false);
   const [textureSize, setTextureSize] = useState(5);
   const [textureLightDirection, setTextureLightDirection] = useState(7);
@@ -6665,13 +6667,23 @@ export default function App() {
 
   const applyContour = useCallback(async () => {
     if (selectedId === null) return;
-    await runCommand("contour", {
-      id: selectedId,
-      size: contourSize,
-      lightDirection: contourLightDirection,
-      strength: contourStrength,
-      preset: contourPreset,
-    });
+    if (contourPreset === "custom") {
+      await runCommand("contour_with_curve", {
+        id: selectedId,
+        size: contourSize,
+        lightDirection: contourLightDirection,
+        strength: contourStrength,
+        points: contourCurve,
+      });
+    } else {
+      await runCommand("contour", {
+        id: selectedId,
+        size: contourSize,
+        lightDirection: contourLightDirection,
+        strength: contourStrength,
+        preset: contourPreset,
+      });
+    }
     setShowContourDialog(false);
   }, [
     runCommand,
@@ -6680,6 +6692,7 @@ export default function App() {
     contourLightDirection,
     contourStrength,
     contourPreset,
+    contourCurve,
   ]);
 
   const applyTexture = useCallback(async () => {
@@ -27494,11 +27507,7 @@ export default function App() {
                 value={bevelGlossContour}
                 onChange={(event) =>
                   setBevelGlossContour(
-                    event.target.value as
-                      | "ring"
-                      | "linear"
-                      | "ringDouble"
-                      | "step",
+                    event.target.value as Exclude<ContourPreset, "custom">,
                   )
                 }
               >
@@ -27506,6 +27515,17 @@ export default function App() {
                 <option value="ring">Ring</option>
                 <option value="ringDouble">Ring - Double</option>
                 <option value="step">Step</option>
+                <option value="cone">Cone</option>
+                <option value="coneInverted">Cone - Inverted</option>
+                <option value="gaussian">Gaussian</option>
+                <option value="ringTriangle">Ring - Triangle</option>
+                <option value="sawtoothOne">Sawtooth 1</option>
+                <option value="sawtoothTwo">Sawtooth 2</option>
+                <option value="rollingSlopeDescending">
+                  Rolling Slope - Descending
+                </option>
+                <option value="halfRound">Half Round</option>
+                <option value="cylinder">Cylinder</option>
               </select>
             </label>
             <label className="control control--row">
@@ -27615,21 +27635,56 @@ export default function App() {
               <select
                 value={contourPreset}
                 onChange={(event) =>
-                  setContourPreset(
-                    event.target.value as
-                      | "ring"
-                      | "linear"
-                      | "ringDouble"
-                      | "step",
-                  )
+                  setContourPreset(event.target.value as ContourPreset)
                 }
               >
                 <option value="linear">Linear</option>
                 <option value="ring">Ring</option>
                 <option value="ringDouble">Ring - Double</option>
                 <option value="step">Step</option>
+                <option value="cone">Cone</option>
+                <option value="coneInverted">Cone - Inverted</option>
+                <option value="gaussian">Gaussian</option>
+                <option value="ringTriangle">Ring - Triangle</option>
+                <option value="sawtoothOne">Sawtooth 1</option>
+                <option value="sawtoothTwo">Sawtooth 2</option>
+                <option value="rollingSlopeDescending">
+                  Rolling Slope - Descending
+                </option>
+                <option value="halfRound">Half Round</option>
+                <option value="cylinder">Cylinder</option>
+                <option value="custom">Custom...</option>
               </select>
             </label>
+            {contourPreset === "custom" && (
+              <>
+                {(["0%", "25%", "50%", "75%", "100%"] as const).map(
+                  (label, i) => (
+                    <label className="control" key={label}>
+                      <span className="control__label">
+                        Input {label} of Size
+                        <span className="control__value">
+                          {contourCurve[i]}
+                        </span>
+                      </span>
+                      <input
+                        type="range"
+                        min={0}
+                        max={255}
+                        value={contourCurve[i]}
+                        onChange={(event) =>
+                          setContourCurve((points) => {
+                            const next = [...points] as typeof points;
+                            next[i] = Number(event.target.value);
+                            return next;
+                          })
+                        }
+                      />
+                    </label>
+                  ),
+                )}
+              </>
+            )}
             <label className="control">
               <span className="control__label">
                 Size

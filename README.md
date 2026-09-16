@@ -25960,6 +25960,83 @@ Tests: 1977 Rust (1976 → 1977, 1970 lib + 7 pipeline), 51 frontend
 (unchanged — this phase adds no new frontend-testable logic, only a
 dropdown option and a label rename).
 
+## Phase 451 — Contour's full real preset list, plus a real custom curve editor
+
+Contour previously offered 4 of Photoshop's own named presets (Linear,
+Ring, Ring - Double, Step). This phase closes that gap for real rather
+than settling for "a few more": researched Photoshop's actual full
+named preset list first (Adobe's own Contour Editor documentation and
+two independent tutorial sites were all confirmed *blocked* by this
+sandbox's network egress policy on direct fetch — a real, verified
+wall, not an assumption), then built this project's own closed-form,
+hand-verified formula for every remaining named preset (Cone, Cone -
+Inverted, Gaussian, Ring - Triangle, Sawtooth 1, Sawtooth 2, Rolling
+Slope - Descending, Half Round, Cylinder) matching that preset's real
+documented shape — since Adobe's own literal spline control points are
+proprietary and were never reachable, these are this project's own
+construction under the same name, honestly not identical to Adobe's
+curve byte-for-byte, but a real, independently-designed formula for
+each one rather than a stand-in. `ContourPreset` grows from 4 to 13
+variants; `gloss_curve` (Bevel & Emboss's own normalized domain) and
+`contour_with`'s raw-height `ring` closure each gain one match arm per
+new preset — `Cone: min(2x,1)`, `ConeInverted: max(0,2x-1)`,
+`Gaussian: max(0,1-4|x-0.5|)`, `RingTriangle`: an asymmetric peak at
+one third rather than Ring's own midpoint, `SawtoothOne`/`SawtoothTwo`:
+a repeating ramp (2 and 4 cycles), `RollingSlopeDescending: 1-x`,
+`HalfRound`/`Cylinder`: a flat plateau with a quarter-width or
+eighth-width ramp on each side.
+
+Beyond presets, this phase also closes the second half of the same
+scope-cut line: a real hand-drawn custom curve editor, Photoshop's own
+Contour Editor freehand mode, not just a longer preset list. A new
+`Document::contour_with_curve(id, size, light_direction, strength,
+points: [u8; 5])` reuses `curve_lookup` directly — the exact same
+five-fixed-input-position straight-segment interpolation the Curves
+adjustment and Duotone's own per-ink curves already use — at input
+positions `[0, size/4, size/2, 3*size/4, size]`, so a caller can draw
+any shape at all, not just pick from a list. `size` must be at least 4
+so those five positions are five genuinely distinct integers (a size
+of 1-3 only has 2-4 distinct integers in `0..=size` to place five
+points on — caught and rejected with a clear error rather than
+silently colliding). Both `contour_with` and `contour_with_curve` now
+share one `contour_shaded` helper for validation, light-direction
+sampling, and the final blend, parameterised only by each one's own
+`ring` closure — no duplicated per-pixel loop between the preset path
+and the custom-curve path.
+
+The standalone Contour dialog's preset dropdown grew to all 13 named
+presets plus a new "Custom..." option that reveals five Input
+0%/25%/50%/75%/100%-of-Size sliders and switches the Apply button to
+call `contour_with_curve` instead of `contour`. Bevel & Emboss's own
+Gloss Contour dropdown also grew to the same 13 named presets (it
+already shares `gloss_curve`), but does **not** yet get a custom-curve
+option — `BevelEmbossOptions.gloss_contour` is a plain preset enum
+field, not a curve, and changing that is a real, separate piece of
+work being left as its own explicit follow-up rather than silently
+dropped or bundled in incompletely.
+
+**Verified two ways.** `contour_with_new_named_presets_match_their_own_hand_computed_shading`
+hand-computes all 9 new named presets against a shared 40×3 strip
+fixture (opaque columns 5-24, `height(c) = min(c-4, 25-c)`) at radius
+12, direction 2, three sample columns chosen so each preset lands on a
+genuinely different part of its own curve — for example Gaussian at
+`toward=8, away=6`: `g(8) = max(0,12-4*2) = 4`, `g(6) = max(0,12-0) =
+12`, relief `12-4=8`, giving `(108,158,208)` from the fixture's own
+`(100,150,200)`. A separate `contour_with_curve_reproduces_an_arbitrary_hand_drawn_zigzag`
+test uses radius 8 (so the five fixed positions are exactly `[0, 2, 4,
+6, 8]`, landing the sampled heights `toward=6, away=4` exactly on two
+of the curve's own nodes with zero interpolation rounding involved) and
+a hand-drawn zigzag `[0, 8, 0, 8, 0]`: `curve(6) = 8`, `curve(4) = 0`,
+relief `0-8=-8`, giving `(92,142,192)` — provably not a preset shape,
+proving genuinely arbitrary curves work. `cargo fmt --check`,
+`cargo clippy --all-targets -- -D warnings`, `cargo test` (full suite),
+`npx tsc --noEmit`, and `npm run build` all clean.
+
+Tests: 1980 Rust (1977 → 1980, 1973 lib + 7 pipeline — three new
+`#[test]` functions: the bundled new-presets test, the custom-curve
+zigzag test, and `contour_with_curve`'s own error-propagation test), 51
+frontend (unchanged).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

@@ -448,6 +448,26 @@ export type BitmapMethod =
   | "halftoneScreen"
   | "halftoneScreenDiamond";
 
+/** Mirrors `ContourPreset` in src-tauri/src/document.rs. "custom" is a
+ * frontend-only value: it isn't sent to the backend at all, it switches
+ * the Contour/Gloss Contour dialog to the `contour_with_curve` command
+ * and its own five-point curve editor instead of `contour`'s preset. */
+export type ContourPreset =
+  | "ring"
+  | "linear"
+  | "ringDouble"
+  | "step"
+  | "cone"
+  | "coneInverted"
+  | "gaussian"
+  | "ringTriangle"
+  | "sawtoothOne"
+  | "sawtoothTwo"
+  | "rollingSlopeDescending"
+  | "halfRound"
+  | "cylinder"
+  | "custom";
+
 /** Mirrors `ColorProfile` in src-tauri/src/document.rs: Edit > Assign
  * Profile / Convert to Profile's real, minimal working spaces. */
 export type ColorProfile = "srgb" | "adobeRgb1998" | "proPhotoRgb";

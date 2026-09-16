@@ -7044,6 +7044,23 @@ fn contour(
     })
 }
 
+/// Layer > Layer Style > Contour on layer `id` with an arbitrary
+/// hand-drawn curve instead of a named preset, baked in destructively.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+fn contour_with_curve(
+    state: State<'_, AppState>,
+    id: LayerId,
+    size: u32,
+    light_direction: u32,
+    strength: u32,
+    points: [u8; 5],
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.contour_with_curve(id, size, light_direction, strength, points)
+    })
+}
+
 /// Layer > Layer Style > Texture on layer `id`, baked in destructively.
 #[tauri::command]
 fn texture(
@@ -8678,6 +8695,7 @@ pub fn run() {
             pattern_overlay,
             bevel_emboss,
             contour,
+            contour_with_curve,
             texture,
             texturizer,
             hue_saturation,
