@@ -2799,6 +2799,7 @@ export default function App() {
   const [diffuseGlowGraininess, setDiffuseGlowGraininess] = useState(4);
   const [diffuseGlowGlowAmount, setDiffuseGlowGlowAmount] = useState(10);
   const [diffuseGlowClearAmount, setDiffuseGlowClearAmount] = useState(10);
+  const [diffuseGlowColor, setDiffuseGlowColor] = useState("#ffffff");
   const [showGlassDialog, setShowGlassDialog] = useState(false);
   const [glassDistortion, setGlassDistortion] = useState(5);
   const [glassSmoothness, setGlassSmoothness] = useState(4);
@@ -8745,6 +8746,7 @@ export default function App() {
       glowAmount: diffuseGlowGlowAmount,
       clearAmount: diffuseGlowClearAmount,
       seed,
+      glowColor: hexToRgb(diffuseGlowColor),
     });
     setShowDiffuseGlowDialog(false);
   }, [
@@ -8753,6 +8755,7 @@ export default function App() {
     diffuseGlowGraininess,
     diffuseGlowGlowAmount,
     diffuseGlowClearAmount,
+    diffuseGlowColor,
   ]);
 
   const applyGlass = useCallback(async () => {
@@ -36142,6 +36145,14 @@ export default function App() {
                 onChange={(event) =>
                   setDiffuseGlowClearAmount(Number(event.target.value))
                 }
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Glow Color (Background)</span>
+              <input
+                type="color"
+                value={diffuseGlowColor}
+                onChange={(event) => setDiffuseGlowColor(event.target.value)}
               />
             </label>
             <div className="modal__actions">

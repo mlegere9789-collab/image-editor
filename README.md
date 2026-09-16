@@ -26138,6 +26138,45 @@ Tests: 1985 Rust (1984 → 1985, 1978 lib + 7 pipeline — one new
 `#[test]`, `wind_never_darkens_only_ever_brightens`; the direction test
 was rewritten in place, not added), 51 frontend (unchanged).
 
+## Phase 454 — Diffuse Glow tints toward the real Background colour
+
+Diffuse Glow pushed every pixel toward hard-coded white. Researched
+Diffuse Glow's actual documented behaviour (a genuine web search this
+session, cross-checked against Adobe's own documentation) and found a
+real, undocumented gap: Photoshop's own Diffuse Glow "uses the active
+Background color to highlight lighter areas of the image" — the glow
+tints toward whatever the user's own Background swatch is set to, not
+a fixed white. This was a real bug this project's own scope-cut note
+never even mentioned, found by actually checking the real behaviour
+rather than trusting the existing write-up.
+
+`Document::diffuse_glow` gains a `glow_color: [u8; 3]` parameter; each
+RGB channel now moves toward that colour's own matching channel,
+`v + (glow_color[c] - v) * strength`, instead of unconditionally toward
+`255.0`. The Diffuse Glow dialog gained a "Glow Color (Background)"
+colour picker, defaulting to white — Photoshop's own default Background
+swatch — so existing muscle memory (Apply with defaults = the old
+behaviour) is unchanged unless a user actually picks a different
+colour, the same "Foreground/Background" colour-picker pattern Chalk &
+Charcoal and Conté Crayon's own dialogs already established.
+
+**Verified two ways.** All four existing hand-computed Diffuse Glow
+tests were updated to pass `[255, 255, 255]` explicitly and still
+assert their own original values byte for byte — proving white-glow
+behaviour is completely unchanged for the common case. A new
+`diffuse_glow_tints_toward_a_real_background_colour_not_hardcoded_white`
+test uses glow colour `[0, 100, 200]` against the same cliff fixture:
+at luma 200 (strength 0.392157), R moves *down* toward 0 (200 → 122),
+G moves down less (200 → 161) toward 100, and B is unchanged (target
+200 already equals the source) — three different per-channel outcomes
+in one pixel, provably not a scaled white blend. `cargo fmt --check`,
+`cargo clippy --all-targets -- -D warnings`, `cargo test` (full suite),
+`npx tsc --noEmit`, and `npm run build` all clean.
+
+Tests: 1986 Rust (1985 → 1986, 1979 lib + 7 pipeline — one new
+`#[test]`; the four existing tests were updated in place, not added),
+51 frontend (unchanged).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

@@ -23564,30 +23564,35 @@ impl Document {
     }
 
     /// Filter Gallery > Distort > Diffuse Glow: pushes each pixel's own
-    /// colour toward white, in proportion to how bright it already is, so
-    /// highlights bloom outward while shadows stay comparatively clear —
-    /// unlike every Sketch-gallery filter this project has built so far,
-    /// this one keeps colour rather than reducing to grayscale.
-    /// `Document::diffuse_glow(id, graininess, glow_amount, clear_amount,
-    /// seed)`: `graininess` (Photoshop's own `0..=10` range) scales a
-    /// seeded [`XorShift32`] draw added to each pixel's own standard-
-    /// weighted luma before the glow calculation, `draw * (graininess /
-    /// 10.0 * 64.0)` — the same per-pixel draw [`Self::note_paper`] and
-    /// [`Self::reticulation`] already use, sized so full graininess can
-    /// shift the brightness estimate by roughly a quarter of the tonal
-    /// range; `glow_amount` and `clear_amount` (both Photoshop's own
-    /// `0..=20` range) combine into a single per-pixel glow strength,
-    /// `(glow_amount / 20.0) * (1.0 - clear_amount / 20.0) * (grained_luma
-    /// / 255.0)`, clamped to `0.0..=1.0` — `clear_amount` scales the
-    /// overall strength down rather than Photoshop's own more nuanced
-    /// clipping of the glow's own tone range, a documented simplification.
-    /// Each RGB channel is pushed toward white by that strength,
-    /// `v + (255.0 - v) * strength`; alpha untouched. Confined to the
-    /// selection the same way every other seeded filter in this project
-    /// is: `filter_pixels` skips the draw entirely for unselected pixels,
-    /// so a selected pixel partway through the image can consume an
-    /// earlier draw than it would in an unselected scan — the same
-    /// architectural fact `spatter`'s own selection test already
+    /// colour toward `glow_color`, in proportion to how bright it already
+    /// is, so highlights bloom outward while shadows stay comparatively
+    /// clear — unlike every Sketch-gallery filter this project has built
+    /// so far, this one keeps colour rather than reducing to grayscale.
+    /// `glow_color` is Photoshop's own real behaviour, confirmed directly
+    /// (Adobe's own Diffuse Glow documentation): the glow tints toward
+    /// the active Background colour swatch, not a hard-coded white — a
+    /// real gap this project had until this was found and fixed, not a
+    /// documented scope cut. `Document::diffuse_glow(id, graininess,
+    /// glow_amount, clear_amount, seed, glow_color)`: `graininess`
+    /// (Photoshop's own `0..=10` range) scales a seeded [`XorShift32`]
+    /// draw added to each pixel's own standard-weighted luma before the
+    /// glow calculation, `draw * (graininess / 10.0 * 64.0)` — the same
+    /// per-pixel draw [`Self::note_paper`] and [`Self::reticulation`]
+    /// already use, sized so full graininess can shift the brightness
+    /// estimate by roughly a quarter of the tonal range; `glow_amount`
+    /// and `clear_amount` (both Photoshop's own `0..=20` range) combine
+    /// into a single per-pixel glow strength, `(glow_amount / 20.0) *
+    /// (1.0 - clear_amount / 20.0) * (grained_luma / 255.0)`, clamped to
+    /// `0.0..=1.0` — `clear_amount` scales the overall strength down
+    /// rather than Photoshop's own more nuanced clipping of the glow's
+    /// own tone range, a documented simplification. Each RGB channel is
+    /// pushed toward `glow_color`'s own matching channel by that
+    /// strength, `v + (glow_color[c] - v) * strength`; alpha untouched.
+    /// Confined to the selection the same way every other seeded filter
+    /// in this project is: `filter_pixels` skips the draw entirely for
+    /// unselected pixels, so a selected pixel partway through the image
+    /// can consume an earlier draw than it would in an unselected scan —
+    /// the same architectural fact `spatter`'s own selection test already
     /// documents.
     pub fn diffuse_glow(
         &mut self,
@@ -23596,6 +23601,7 @@ impl Document {
         glow_amount: u32,
         clear_amount: u32,
         seed: u32,
+        glow_color: [u8; 3],
     ) -> Result<Option<Rect>, String> {
         if graininess > 10 {
             return Err("Diffuse Glow graininess must be between 0 and 10.".to_string());
@@ -23622,7 +23628,8 @@ impl Document {
             let mut out = [0u8; CHANNELS];
             for c in 0..3 {
                 let v = src[base + c] as f32;
-                out[c] = (v + (255.0 - v) * strength).round().clamp(0.0, 255.0) as u8;
+                let target = glow_color[c] as f32;
+                out[c] = (v + (target - v) * strength).round().clamp(0.0, 255.0) as u8;
             }
             out[3] = src[base + 3];
             out
@@ -48437,7 +48444,7 @@ mod tests {
     }
 
     #[test]
-    fn diffuse_glow_pushes_bright_pixels_further_toward_white() {
+    fn diffuse_glow_pushes_bright_pixels_further_toward_the_glow_color() {
         // Same cliff fixture: 4x4, columns 0-1 solid 200, columns 2-3
         // solid 50 (grayscale, so luma equals the channel value exactly).
         // Graininess 0 zeroes the grain scale, so the seed is irrelevant
@@ -48448,10 +48455,14 @@ mod tests {
         //   luma 50: strength = 0.5 * 50/255 = 0.098039,
         //     v = 50 + 205*0.098039 = 70.10 -> rounds to 70.
         // Cross-checked against an independent Python script emulating
-        // f32 arithmetic via struct.pack/unpack round-tripping.
+        // f32 arithmetic via struct.pack/unpack round-tripping. Glow
+        // colour is white here, Photoshop's own default Background
+        // swatch, matching this project's own previous hard-coded
+        // behaviour exactly -- a real, non-white glow colour is covered
+        // by a separate test below.
         let idx = |x: usize, y: usize| (y * 4 + x) * 4;
         let (mut doc, id) = ink_outlines_cliff_fixture();
-        doc.diffuse_glow(id, 0, 10, 0, 1).unwrap();
+        doc.diffuse_glow(id, 0, 10, 0, 1, [255, 255, 255]).unwrap();
         let p = &doc.layers()[0].pixels;
         assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [222, 222, 222, 255]);
         assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [222, 222, 222, 255]);
@@ -48471,7 +48482,7 @@ mod tests {
         // and 70, not a coincidental match.
         let idx = |x: usize, y: usize| (y * 4 + x) * 4;
         let (mut doc, id) = ink_outlines_cliff_fixture();
-        doc.diffuse_glow(id, 0, 10, 10, 1).unwrap();
+        doc.diffuse_glow(id, 0, 10, 10, 1, [255, 255, 255]).unwrap();
         let p = &doc.layers()[0].pixels;
         assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [211, 211, 211, 255]);
         assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [60, 60, 60, 255]);
@@ -48495,7 +48506,7 @@ mod tests {
         // independent Python script.
         let idx = |x: usize, y: usize| (y * 4 + x) * 4;
         let (mut doc, id) = ink_outlines_cliff_fixture();
-        doc.diffuse_glow(id, 10, 10, 0, 1).unwrap();
+        doc.diffuse_glow(id, 10, 10, 0, 1, [255, 255, 255]).unwrap();
         let p = &doc.layers()[0].pixels;
         assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [215, 215, 215, 255]);
         assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [215, 215, 215, 255]);
@@ -48516,7 +48527,7 @@ mod tests {
         let (mut doc, id) = ink_outlines_cliff_fixture();
         let before = doc.layers()[0].pixels.clone();
         doc.select_rectangle(1.0, 0.0, 2.0, 1.0).unwrap();
-        let dirty = doc.diffuse_glow(id, 10, 10, 0, 1).unwrap();
+        let dirty = doc.diffuse_glow(id, 10, 10, 0, 1, [255, 255, 255]).unwrap();
         let after = &doc.layers()[0].pixels;
         assert_eq!(&after[idx(1, 0)..idx(1, 0) + 4], [215, 215, 215, 255]);
         assert_eq!(after[..idx(1, 0)], before[..idx(1, 0)]); // unselected, untouched
@@ -48535,14 +48546,49 @@ mod tests {
     #[test]
     fn diffuse_glow_propagates_errors() {
         let (mut doc, id) = doc_with_one_layer();
-        assert!(doc.diffuse_glow(id, 11, 10, 0, 1).is_err());
-        assert!(doc.diffuse_glow(id, 0, 21, 0, 1).is_err());
-        assert!(doc.diffuse_glow(id, 0, 10, 21, 1).is_err());
+        assert!(doc.diffuse_glow(id, 11, 10, 0, 1, [255, 255, 255]).is_err());
+        assert!(doc.diffuse_glow(id, 0, 21, 0, 1, [255, 255, 255]).is_err());
+        assert!(doc.diffuse_glow(id, 0, 10, 21, 1, [255, 255, 255]).is_err());
         doc.set_locked(id, true).unwrap();
-        assert!(doc.diffuse_glow(id, 0, 10, 0, 1).is_err());
+        assert!(doc.diffuse_glow(id, 0, 10, 0, 1, [255, 255, 255]).is_err());
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
-        assert!(empty.diffuse_glow(999, 0, 10, 0, 1).is_err());
+        assert!(empty
+            .diffuse_glow(999, 0, 10, 0, 1, [255, 255, 255])
+            .is_err());
+    }
+
+    #[test]
+    fn diffuse_glow_tints_toward_a_real_background_colour_not_hardcoded_white() {
+        // Same cliff fixture and strength math as the plain white-glow
+        // test (luma 200 -> strength 0.392157, luma 50 -> strength
+        // 0.098039), but glow_color = [0, 100, 200] (a real, non-white
+        // Background swatch) instead of white -- Photoshop's own actual
+        // documented behaviour ("uses the active Background color to
+        // highlight lighter areas"), not the fixed-white simplification
+        // this project shipped with before. Per channel,
+        // v = orig + (target - orig) * strength:
+        //   R (orig 200, target 0): 200 + (0-200)*0.392157 = 200 - 78.43
+        //     = 121.57 -> 122.
+        //   G (orig 200, target 100): 200 + (100-200)*0.392157 = 200 -
+        //     39.22 = 160.78 -> 161.
+        //   B (orig 200, target 200): 200 + (200-200)*0.392157 = 200
+        //     unchanged.
+        //   R (orig 50, target 0): 50 + (0-50)*0.098039 = 50 - 4.90 =
+        //     45.10 -> 45.
+        //   G (orig 50, target 100): 50 + (100-50)*0.098039 = 50 + 4.90
+        //     = 54.90 -> 55.
+        //   B (orig 50, target 200): 50 + (200-50)*0.098039 = 50 +
+        //     14.71 = 64.71 -> 65.
+        // A real, hand-computed, per-channel-independent result --
+        // provably not just a scaled-white blend, since R decreases
+        // while G and B move differently and in different directions.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.diffuse_glow(id, 0, 10, 0, 1, [0, 100, 200]).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [122, 161, 200, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [45, 55, 65, 255]);
     }
 
     #[test]

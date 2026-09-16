@@ -6600,6 +6600,7 @@ fn chrome(
 /// Filter Gallery > Distort > Diffuse Glow on layer `id`. The frontend
 /// sends a fresh `seed` on every apply, as with Film Grain.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 fn diffuse_glow(
     state: State<'_, AppState>,
     id: LayerId,
@@ -6607,9 +6608,10 @@ fn diffuse_glow(
     glow_amount: u32,
     clear_amount: u32,
     seed: u32,
+    glow_color: [u8; 3],
 ) -> Result<Snapshot, String> {
     edit_checkpointed(&state, |document| {
-        document.diffuse_glow(id, graininess, glow_amount, clear_amount, seed)
+        document.diffuse_glow(id, graininess, glow_amount, clear_amount, seed, glow_color)
     })
 }
 
