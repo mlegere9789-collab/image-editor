@@ -1,0 +1,712 @@
+[
+ {
+  "family": "Abril Fatface",
+  "category": "display",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Alegreya",
+  "category": "serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Alfa Slab One",
+  "category": "display",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Amatic SC",
+  "category": "display",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Anton",
+  "category": "display",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Architects Daughter",
+  "category": "handwriting",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Archivo",
+  "category": "sans-serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Archivo Black",
+  "category": "display",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Arvo",
+  "category": "serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Asap",
+  "category": "sans-serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Assistant",
+  "category": "sans-serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Audiowide",
+  "category": "display",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Bangers",
+  "category": "display",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Barlow",
+  "category": "sans-serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Bebas Neue",
+  "category": "display",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Bitter",
+  "category": "serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Black Ops One",
+  "category": "display",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Bungee",
+  "category": "display",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Cabin",
+  "category": "sans-serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Cardo",
+  "category": "serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Caveat",
+  "category": "handwriting",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Chivo",
+  "category": "sans-serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Cinzel",
+  "category": "serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Comfortaa",
+  "category": "sans-serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Coming Soon",
+  "category": "handwriting",
+  "license": "Apache License 2.0"
+ },
+ {
+  "family": "Cookie",
+  "category": "handwriting",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Cormorant Garamond",
+  "category": "serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Courgette",
+  "category": "handwriting",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Crimson Text",
+  "category": "serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "DM Sans",
+  "category": "sans-serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "DM Serif Display",
+  "category": "serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Dancing Script",
+  "category": "handwriting",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Domine",
+  "category": "serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Dosis",
+  "category": "sans-serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "EB Garamond",
+  "category": "serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Encode Sans",
+  "category": "sans-serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Exo 2",
+  "category": "sans-serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Figtree",
+  "category": "sans-serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Fira Code",
+  "category": "monospace",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Fira Sans",
+  "category": "sans-serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Fjalla One",
+  "category": "display",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Frank Ruhl Libre",
+  "category": "serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Fraunces",
+  "category": "serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Fredoka",
+  "category": "sans-serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Great Vibes",
+  "category": "handwriting",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Heebo",
+  "category": "sans-serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Hind",
+  "category": "sans-serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Homemade Apple",
+  "category": "handwriting",
+  "license": "Apache License 2.0"
+ },
+ {
+  "family": "IBM Plex Mono",
+  "category": "monospace",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "IBM Plex Sans",
+  "category": "sans-serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "IBM Plex Serif",
+  "category": "serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Inconsolata",
+  "category": "monospace",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Indie Flower",
+  "category": "handwriting",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Inter",
+  "category": "sans-serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "JetBrains Mono",
+  "category": "monospace",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Josefin Sans",
+  "category": "sans-serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Just Another Hand",
+  "category": "handwriting",
+  "license": "Apache License 2.0"
+ },
+ {
+  "family": "Kalam",
+  "category": "handwriting",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Kanit",
+  "category": "sans-serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Karla",
+  "category": "sans-serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Kaushan Script",
+  "category": "handwriting",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Lato",
+  "category": "sans-serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Lexend",
+  "category": "sans-serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Libre Baskerville",
+  "category": "serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Libre Franklin",
+  "category": "sans-serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Lilita One",
+  "category": "display",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Literata",
+  "category": "serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Lobster",
+  "category": "display",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Lora",
+  "category": "serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Luckiest Guy",
+  "category": "display",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Manrope",
+  "category": "sans-serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Maven Pro",
+  "category": "sans-serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Merriweather",
+  "category": "serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Merriweather Sans",
+  "category": "sans-serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Monoton",
+  "category": "display",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Montserrat",
+  "category": "sans-serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Mulish",
+  "category": "sans-serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Newsreader",
+  "category": "serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Noto Sans",
+  "category": "sans-serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Noto Serif",
+  "category": "serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Nunito",
+  "category": "sans-serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Nunito Sans",
+  "category": "sans-serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Old Standard TT",
+  "category": "serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Onest",
+  "category": "sans-serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Open Sans",
+  "category": "sans-serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Orbitron",
+  "category": "display",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Oswald",
+  "category": "display",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Outfit",
+  "category": "sans-serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Overpass",
+  "category": "sans-serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Oxygen",
+  "category": "sans-serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "PT Sans",
+  "category": "sans-serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "PT Serif",
+  "category": "serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Pacifico",
+  "category": "handwriting",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Passion One",
+  "category": "display",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Patrick Hand",
+  "category": "handwriting",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Permanent Marker",
+  "category": "handwriting",
+  "license": "Apache License 2.0"
+ },
+ {
+  "family": "Playfair Display",
+  "category": "serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Plus Jakarta Sans",
+  "category": "sans-serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Poppins",
+  "category": "sans-serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Press Start 2P",
+  "category": "display",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Prompt",
+  "category": "sans-serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Public Sans",
+  "category": "sans-serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Quicksand",
+  "category": "sans-serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Raleway",
+  "category": "sans-serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Red Hat Display",
+  "category": "sans-serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Red Hat Text",
+  "category": "sans-serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Reenie Beanie",
+  "category": "handwriting",
+  "license": "Apache License 2.0"
+ },
+ {
+  "family": "Righteous",
+  "category": "display",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Roboto",
+  "category": "sans-serif",
+  "license": "Apache License 2.0"
+ },
+ {
+  "family": "Roboto Condensed",
+  "category": "sans-serif",
+  "license": "Apache License 2.0"
+ },
+ {
+  "family": "Roboto Mono",
+  "category": "monospace",
+  "license": "Apache License 2.0"
+ },
+ {
+  "family": "Roboto Slab",
+  "category": "serif",
+  "license": "Apache License 2.0"
+ },
+ {
+  "family": "Rock Salt",
+  "category": "handwriting",
+  "license": "Apache License 2.0"
+ },
+ {
+  "family": "Rubik",
+  "category": "sans-serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Russo One",
+  "category": "display",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Sacramento",
+  "category": "handwriting",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Sarabun",
+  "category": "sans-serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Satisfy",
+  "category": "handwriting",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Shadows Into Light",
+  "category": "handwriting",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Signika",
+  "category": "sans-serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Sora",
+  "category": "sans-serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Source Code Pro",
+  "category": "monospace",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Source Sans 3",
+  "category": "sans-serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Source Serif 4",
+  "category": "serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Space Grotesk",
+  "category": "sans-serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Space Mono",
+  "category": "monospace",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Special Elite",
+  "category": "monospace",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Spectral",
+  "category": "serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Staatliches",
+  "category": "display",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Syncopate",
+  "category": "display",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Teko",
+  "category": "display",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Titillium Web",
+  "category": "sans-serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Ubuntu",
+  "category": "sans-serif",
+  "license": "Ubuntu Font Licence 1.0"
+ },
+ {
+  "family": "Ubuntu Condensed",
+  "category": "sans-serif",
+  "license": "Ubuntu Font Licence 1.0"
+ },
+ {
+  "family": "Ubuntu Mono",
+  "category": "monospace",
+  "license": "Ubuntu Font Licence 1.0"
+ },
+ {
+  "family": "Urbanist",
+  "category": "sans-serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Varela Round",
+  "category": "sans-serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Vollkorn",
+  "category": "serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Work Sans",
+  "category": "sans-serif",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Yanone Kaffeesatz",
+  "category": "display",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Yellowtail",
+  "category": "handwriting",
+  "license": "SIL Open Font License 1.1"
+ },
+ {
+  "family": "Zilla Slab",
+  "category": "serif",
+  "license": "SIL Open Font License 1.1"
+ }
+]
