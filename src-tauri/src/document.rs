@@ -935,6 +935,16 @@ pub enum SelectiveColorRange {
     Blacks,
 }
 
+/// Selective Color's own Relative/Absolute method picker:
+/// [`Document::selective_color_method_with`]'s own second reading of
+/// each slider, alongside the colour-range it scales.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SelectiveColorMethod {
+    Relative,
+    Absolute,
+}
+
 /// A pixel's membership, `0.0..=1.0`, in Selective Color's `range` —
 /// this project's own explainable stand-in for Photoshop's exact
 /// (undocumented) per-range weighting, the same kind of classic,
@@ -24128,8 +24138,8 @@ impl Document {
     /// 100) * (255 - v)` when negative (adding back toward the channel's
     /// own headroom); `black` is then applied identically to all three
     /// already-adjusted channels, darkening or lightening them together.
-    /// Photoshop's Absolute method, a different slider interpretation
-    /// entirely, remains a documented scope cut. Alpha untouched.
+    /// [`Self::selective_color_method_with`] fills in Photoshop's other
+    /// method, Absolute. Alpha untouched.
     pub fn selective_color(
         &mut self,
         id: LayerId,
@@ -24152,7 +24162,8 @@ impl Document {
     /// ranges: `range`'s own membership weight (`selective_color_weight`)
     /// replaces the Neutrals-only weight the plain command always used.
     /// Every other slider validates, mixes, and applies exactly as
-    /// [`Self::selective_color`] documents.
+    /// [`Self::selective_color`] documents, always by Relative — see
+    /// [`Self::selective_color_method_with`] for Absolute.
     pub fn selective_color_with(
         &mut self,
         id: LayerId,
@@ -24161,6 +24172,42 @@ impl Document {
         magenta: i32,
         yellow: i32,
         black: i32,
+    ) -> Result<Option<Rect>, String> {
+        self.selective_color_method_with(
+            id,
+            range,
+            cyan,
+            magenta,
+            yellow,
+            black,
+            SelectiveColorMethod::Relative,
+        )
+    }
+
+    /// [`Self::selective_color_with`] with a choice of Photoshop's own
+    /// two methods. Relative (unchanged from [`Self::selective_color_with`]
+    /// above) scales each slider by how much headroom the channel already
+    /// has, `v - weight * (slider / 100) * v` when positive or `v -
+    /// weight * (slider / 100) * (255 - v)` when negative, so the same
+    /// slider moves a saturated channel less than a middling one.
+    /// Absolute reads the slider as a flat share of the full `0..=255`
+    /// range instead, `v - weight * (slider / 100) * 255` either way,
+    /// so it can drive a channel to its limit (or past it, clamped) in
+    /// one full-strength slider regardless of the pixel's own starting
+    /// value — Photoshop's own documented difference between the two.
+    /// `black` is applied identically to all three already-adjusted
+    /// channels by the same method, darkening or lightening them
+    /// together. Alpha untouched.
+    #[allow(clippy::too_many_arguments)]
+    pub fn selective_color_method_with(
+        &mut self,
+        id: LayerId,
+        range: SelectiveColorRange,
+        cyan: i32,
+        magenta: i32,
+        yellow: i32,
+        black: i32,
+        method: SelectiveColorMethod,
     ) -> Result<Option<Rect>, String> {
         for (name, value) in [
             ("cyan", cyan),
@@ -24174,11 +24221,16 @@ impl Document {
                 ));
             }
         }
-        let apply_slider = |v: f32, slider: i32, weight: f32| -> f32 {
-            if slider >= 0 {
-                v - weight * slider as f32 / 100.0 * v
-            } else {
-                v - weight * slider as f32 / 100.0 * (255.0 - v)
+        let apply_slider = move |v: f32, slider: i32, weight: f32| -> f32 {
+            match method {
+                SelectiveColorMethod::Relative => {
+                    if slider >= 0 {
+                        v - weight * slider as f32 / 100.0 * v
+                    } else {
+                        v - weight * slider as f32 / 100.0 * (255.0 - v)
+                    }
+                }
+                SelectiveColorMethod::Absolute => v - weight * slider as f32 / 100.0 * 255.0,
             }
         };
         self.adjust_layer_pixels(id, move |[r, g, b, a]| {
@@ -48948,6 +49000,102 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.selective_color(999, 0, 0, 0, 0).is_err());
+    }
+
+    #[test]
+    fn selective_color_method_with_absolute_moves_a_flat_share_of_the_full_range_regardless_of_the_pixels_own_value(
+    ) {
+        // column_stripes_fixture: columns 0..3 are grayscale 10, 20, 30,
+        // 40, giving Neutrals weight v/128 exactly (0.078125, 0.15625,
+        // 0.234375, 0.3125, the same weights the Relative tests above
+        // already use). Absolute reads a slider as a flat share of the
+        // full 0..=255 range instead of scaling by the pixel's own
+        // value: cyan 40 subtracts weight * 0.4 * 255 = weight * 102
+        // from r alone (magenta and yellow are both 0, so g/b, both
+        // equal to r before this, are untouched):
+        //   col 0: 10 - 0.078125*102 = 10 - 7.96875  = 2.03125 -> 2
+        //   col 1: 20 - 0.15625 *102 = 20 - 15.9375  = 4.0625  -> 4
+        //   col 2: 30 - 0.234375*102 = 30 - 23.90625 = 6.09375 -> 6
+        //   col 3: 40 - 0.3125  *102 = 40 - 31.875   = 8.125   -> 8
+        // Relative would instead scale by each pixel's own value (col 3
+        // would move by weight*0.4*40 = 5, not weight*0.4*255 = 31.875),
+        // so this result could not come from the Relative formula above.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = column_stripes_fixture();
+        doc.selective_color_method_with(
+            id,
+            SelectiveColorRange::Neutrals,
+            40,
+            0,
+            0,
+            0,
+            SelectiveColorMethod::Absolute,
+        )
+        .unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [2, 10, 10, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [4, 20, 20, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [6, 30, 30, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [8, 40, 40, 255]);
+    }
+
+    #[test]
+    fn selective_color_method_with_absolute_clamps_at_either_rail_and_applies_black_by_the_same_method(
+    ) {
+        // A fully neutral 128 pixel has Neutrals weight exactly 1.0, so
+        // a slider's whole 0..=255 share applies unclamped by the
+        // weight. Cyan 100 Absolute: r = 128 - 1.0*255 = -127, clamped
+        // to 0 -- a single full-strength slider can drive a channel to
+        // its rail outright, which Relative's own v-scaled formula can
+        // only ever approach. Cyan -100 on a fresh copy of the same
+        // pixel: r = 128 + 1.0*255 = 383, clamped to 255, the opposite
+        // rail. A third copy folds cyan 20 and black 20 together, black
+        // applied after cyan by the same method (weight*0.2*255 = 51
+        // each time): r = 128 - 51 = 77, then 77 - 51 = 26; g and b,
+        // untouched by cyan (magenta/yellow are 0), go straight from
+        // 128 to 128 - 51 = 77 under black alone.
+        let gray = solid(1, 1, [128, 128, 128, 255]);
+        let mut high = Document::new(1, 1).unwrap();
+        let high_id = high.add_layer("gray", &gray, 1, 1).unwrap();
+        high.selective_color_method_with(
+            high_id,
+            SelectiveColorRange::Neutrals,
+            100,
+            0,
+            0,
+            0,
+            SelectiveColorMethod::Absolute,
+        )
+        .unwrap();
+        assert_eq!(high.layers()[0].pixels, [0, 128, 128, 255]);
+
+        let mut low = Document::new(1, 1).unwrap();
+        let low_id = low.add_layer("gray", &gray, 1, 1).unwrap();
+        low.selective_color_method_with(
+            low_id,
+            SelectiveColorRange::Neutrals,
+            -100,
+            0,
+            0,
+            0,
+            SelectiveColorMethod::Absolute,
+        )
+        .unwrap();
+        assert_eq!(low.layers()[0].pixels, [255, 128, 128, 255]);
+
+        let mut both = Document::new(1, 1).unwrap();
+        let both_id = both.add_layer("gray", &gray, 1, 1).unwrap();
+        both.selective_color_method_with(
+            both_id,
+            SelectiveColorRange::Neutrals,
+            20,
+            0,
+            0,
+            20,
+            SelectiveColorMethod::Absolute,
+        )
+        .unwrap();
+        assert_eq!(both.layers()[0].pixels, [26, 77, 77, 255]);
     }
 
     fn stroke_outline_fixture() -> (Document, LayerId) {

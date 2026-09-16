@@ -74,6 +74,10 @@ export type SelectiveColorRange =
   | "neutrals"
   | "blacks";
 
+/** Mirrors `SelectiveColorMethod` in src-tauri/src/document.rs: Selective
+ * Color's Relative/Absolute method picker. */
+export type SelectiveColorMethod = "relative" | "absolute";
+
 /** Mirrors `ApplyMask` in src-tauri/src/document.rs: Apply Image's Mask
  * group — a mask image (`null` = merged) read through one channel (RGB =
  * luma), optionally inverted. */

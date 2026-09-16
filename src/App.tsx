@@ -127,6 +127,7 @@ import type {
   SelectAndMaskOutput,
   SelectionMode,
   SelectionShape,
+  SelectiveColorMethod,
   SelectiveColorRange,
   ShapeBlurKernel,
   Snapshot,
@@ -2069,6 +2070,8 @@ export default function App() {
   const [selectiveColorBlack, setSelectiveColorBlack] = useState(0);
   const [selectiveColorRange, setSelectiveColorRange] =
     useState<SelectiveColorRange>("neutrals");
+  const [selectiveColorMethod, setSelectiveColorMethod] =
+    useState<SelectiveColorMethod>("relative");
   const [showStrokeOutlineDialog, setShowStrokeOutlineDialog] = useState(false);
   const [strokeOutlineSize, setStrokeOutlineSize] = useState(3);
   const [strokeOutlineColor, setStrokeOutlineColor] = useState("#000000");
@@ -6361,6 +6364,7 @@ export default function App() {
       yellow: selectiveColorYellow,
       black: selectiveColorBlack,
       range: selectiveColorRange,
+      method: selectiveColorMethod,
     });
     setShowSelectiveColorDialog(false);
   }, [
@@ -6371,6 +6375,7 @@ export default function App() {
     selectiveColorYellow,
     selectiveColorBlack,
     selectiveColorRange,
+    selectiveColorMethod,
   ]);
 
   const applyStrokeOutline = useCallback(async () => {
@@ -25930,6 +25935,20 @@ export default function App() {
                 <option value="whites">Whites</option>
                 <option value="neutrals">Neutrals</option>
                 <option value="blacks">Blacks</option>
+              </select>
+            </label>
+            <label className="control">
+              <span className="control__label">Method</span>
+              <select
+                value={selectiveColorMethod}
+                onChange={(event) =>
+                  setSelectiveColorMethod(
+                    event.target.value as SelectiveColorMethod,
+                  )
+                }
+              >
+                <option value="relative">Relative</option>
+                <option value="absolute">Absolute</option>
               </select>
             </label>
             <label className="control">

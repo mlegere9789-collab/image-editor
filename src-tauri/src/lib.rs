@@ -6744,8 +6744,10 @@ fn craquelure(
 }
 
 /// Image > Adjustments > Selective Color on layer `id`. `range` defaults
-/// to Neutrals, the one range this command always supported.
+/// to Neutrals, the one range this command always supported; `method`
+/// defaults to Relative, Photoshop's own default method.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 fn selective_color(
     state: State<'_, AppState>,
     id: LayerId,
@@ -6754,15 +6756,17 @@ fn selective_color(
     yellow: i32,
     black: i32,
     range: Option<document::SelectiveColorRange>,
+    method: Option<document::SelectiveColorMethod>,
 ) -> Result<Snapshot, String> {
     edit_checkpointed(&state, |document| {
-        document.selective_color_with(
+        document.selective_color_method_with(
             id,
             range.unwrap_or(document::SelectiveColorRange::Neutrals),
             cyan,
             magenta,
             yellow,
             black,
+            method.unwrap_or(document::SelectiveColorMethod::Relative),
         )
     })
 }

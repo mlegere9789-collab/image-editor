@@ -25263,6 +25263,52 @@ touched.
 
 Tests: 1970 Rust (unchanged), 46 frontend (unchanged).
 
+## Phase 434 — Selective Color's Absolute Method
+
+Resolved Selective Color's own documented scope cut: its Method toggle,
+Relative (already this project's own behaviour throughout) or Absolute,
+one of Photoshop's two genuinely documented ways to read every slider —
+unlike most of this project's other still-open scope cuts, which stand
+in for an undocumented Photoshop internal, this one has an exact,
+well-known formula difference to match.
+
+`document.rs` gains a `SelectiveColorMethod` enum (`Relative`/`Absolute`)
+next to `SelectiveColorRange`. `selective_color_with` is now a thin
+delegate to a new `selective_color_method_with(..., method)`, the
+established "plain function keeps its old behaviour, delegates to a
+richer `_with` sibling" pattern this project uses throughout (most
+recently for Iris Blur's and Tilt-Shift's own feather widths, Phases
+428–429) — so every existing Relative caller, Rust and frontend alike,
+is untouched. Inside, `apply_slider` gains a `match` on `method`:
+Relative keeps the exact old formula (`v - weight*(slider/100)*v` when
+positive, `v - weight*(slider/100)*(255-v)` when negative — scaled by
+how much of the channel, or its headroom, is already there); Absolute
+is one formula for both signs, `v - weight*(slider/100)*255` — a flat
+share of the whole 0–255 range, so it can drive a channel to either
+rail outright in one full-strength slider, something Relative's own
+v-scaled formula can only ever approach. `black` runs through the same
+`apply_slider` a second time by the same method, exactly as before.
+`lib.rs`'s single `selective_color` command (the only Tauri command
+this feature has ever needed, `range` and now `method` both optional
+with Photoshop's own defaults — Neutrals, Relative) gained the new
+parameter; `#[allow(clippy::too_many_arguments)]` follows this
+project's own established precedent for an eighth parameter. The
+frontend gained a `SelectiveColorMethod` type (`types.ts`) and a
+`selectiveColorMethod` state defaulting to `"relative"`, sent alongside
+the dialog's existing four sliders and Colors range, with a new Method
+select — Relative/Absolute — right below it.
+
+Two new hand-computed tests reuse `column_stripes_fixture` (the same
+10/20/30/40 grayscale columns, and the same Neutrals weights — v/128 —
+the file's own pre-existing Relative tests already established) for an
+exact, divergent-from-Relative Absolute result, and a fresh single
+neutral (128, weight exactly 1.0) pixel for the two-rail clamp case plus
+a cyan-then-black combination. `cargo fmt`/`clippy --all-targets -D
+warnings`/`test` and `npx tsc --noEmit`/`npm run build`/`npm test` all
+clean.
+
+Tests: 1972 Rust (1970 → 1972: two new tests), 46 frontend (unchanged).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
