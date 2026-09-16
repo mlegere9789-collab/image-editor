@@ -1365,11 +1365,18 @@ export default function App() {
   const [indexedPalette, setIndexedPalette] =
     useState<Palette["kind"]>("adaptive");
   const [indexedColors, setIndexedColors] = useState(256);
-  // Image > Mode > Duotone: one to four ink colours (straight curves).
+  // Image > Mode > Duotone: one to four ink colours, each with its own
+  // darkness-to-coverage curve at the same five fixed input positions
+  // (0, 64, 128, 192, 255) the plain Curves command uses; a straight
+  // identity curve (output = input at all five) is the default.
   const [showDuotoneDialog, setShowDuotoneDialog] = useState(false);
   const [duotoneInks, setDuotoneInks] = useState<string[]>([
     "#000000",
     "#0080ff",
+  ]);
+  const [duotoneCurves, setDuotoneCurves] = useState<number[][]>([
+    [0, 64, 128, 192, 255],
+    [0, 64, 128, 192, 255],
   ]);
   const [applyImageSource, setApplyImageSource] = useState<number | "merged">(
     "merged",
@@ -21084,7 +21091,8 @@ export default function App() {
             <p className="modal__hint">
               Every layer becomes its grey printed through the inks, darkest
               where every ink is full; one ink is a monotone, four a quadtone.
-              Curves are straight here.
+              Each ink's own Curve maps its darkness to how much of that ink
+              prints, straight (output = input) by default.
             </p>
             <label className="control control--row">
               <span className="control__label">Type</span>
@@ -21103,6 +21111,17 @@ export default function App() {
                           ),
                         ],
                   );
+                  setDuotoneCurves((curves) =>
+                    curves.length >= count
+                      ? curves.slice(0, count)
+                      : [
+                          ...curves,
+                          ...Array.from(
+                            { length: count - curves.length },
+                            () => [0, 64, 128, 192, 255],
+                          ),
+                        ],
+                  );
                 }}
               >
                 <option value={1}>Monotone</option>
@@ -21112,20 +21131,53 @@ export default function App() {
               </select>
             </label>
             {duotoneInks.map((ink, index) => (
-              <label className="control control--row" key={index}>
-                <span className="control__label">Ink {index + 1}</span>
-                <input
-                  type="color"
-                  value={ink}
-                  onChange={(event) =>
-                    setDuotoneInks((inks) =>
-                      inks.map((c, i) =>
-                        i === index ? event.target.value : c,
-                      ),
-                    )
-                  }
-                />
-              </label>
+              <Fragment key={index}>
+                <label className="control control--row">
+                  <span className="control__label">Ink {index + 1}</span>
+                  <input
+                    type="color"
+                    value={ink}
+                    onChange={(event) =>
+                      setDuotoneInks((inks) =>
+                        inks.map((c, i) =>
+                          i === index ? event.target.value : c,
+                        ),
+                      )
+                    }
+                  />
+                </label>
+                {(["0", "64", "128", "192", "255"] as const).map(
+                  (input, pointIndex) => (
+                    <label className="control" key={input}>
+                      <span className="control__label">
+                        Ink {index + 1} Curve — Input {input}
+                        <span className="control__value">
+                          {duotoneCurves[index]?.[pointIndex] ?? 0}
+                        </span>
+                      </span>
+                      <input
+                        type="range"
+                        min={0}
+                        max={255}
+                        value={duotoneCurves[index]?.[pointIndex] ?? 0}
+                        onChange={(event) =>
+                          setDuotoneCurves((curves) =>
+                            curves.map((points, i) =>
+                              i === index
+                                ? points.map((v, p) =>
+                                    p === pointIndex
+                                      ? Number(event.target.value)
+                                      : v,
+                                  )
+                                : points,
+                            ),
+                          )
+                        }
+                      />
+                    </label>
+                  ),
+                )}
+              </Fragment>
             ))}
             <div className="modal__actions">
               <button
@@ -21137,9 +21189,16 @@ export default function App() {
               <button
                 className="button"
                 onClick={() => {
-                  const inks: Ink[] = duotoneInks.map((hex) => ({
+                  const xs = [0, 64, 128, 192, 255];
+                  const inks: Ink[] = duotoneInks.map((hex, index) => ({
                     color: hexToRgb(hex),
-                    curve: [],
+                    curve: xs.map(
+                      (x, i) =>
+                        [x, duotoneCurves[index]?.[i] ?? x] as [
+                          number,
+                          number,
+                        ],
+                    ),
                   }));
                   void runCommand("convert_to_duotone", { inks });
                   setShowDuotoneDialog(false);

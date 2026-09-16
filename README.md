@@ -25764,6 +25764,42 @@ type and the Bitmap dialog's Method select both gained the new option.
 
 Tests: 1974 Rust (1972 → 1974: two new tests), 46 frontend (unchanged).
 
+## Phase 446 — Duotone's Curve Editor
+
+Another stale-scope-cut find, the same pattern this project has now
+caught half a dozen times (Conté Crayon's Texture, Define Brush
+Preset's Texture, and others): `Ink.curve` — a real, arbitrary-points
+darkness-to-coverage curve per ink, applied through `curve_lookup` and
+already covered by its own hand-computed test,
+`an_ink_curve_scales_its_coverage` (grey 0/128 through a curve to 127
+prints 128/192, verified since before this session) — was fully built
+and tested, but the Duotone dialog itself always sent `curve: []` for
+every ink, making the whole mechanism unreachable from the UI. The
+parity doc's own "the dialog's curve editor" line was describing a gap
+that was actually already closed on the Rust side.
+
+Purely a frontend fix, no `document.rs` change: a new `duotoneCurves`
+state, one five-element array per ink at the same fixed input
+positions `[0, 64, 128, 192, 255]` the plain Curves command uses,
+defaulting to the identity (`output = input`, reproducing the dialog's
+previous always-straight behaviour exactly). The ink-count `<select>`
+now resizes `duotoneCurves` in lockstep with `duotoneInks` when
+switching between Monotone/Duotone/Tritone/Quadtone. Each ink gets five
+new "Curve — Input N" sliders alongside its existing colour swatch, and
+the dialog's own OK handler now builds each `Ink`'s real `curve: [(x,
+y)]` pairs from that ink's own five slider values instead of the
+hardcoded `[]`.
+
+No new Rust test needed — the backend behaviour this now finally
+reaches was already proven byte-for-byte by the pre-existing
+`an_ink_curve_scales_its_coverage` test, the same reasoning the Conté
+Crayon and Define Brush Preset texture fixes used. `npx tsc
+--noEmit`, `npm run build`, and `npm test` all clean (46/46 existing
+frontend tests unmodified); `git status` confirms only `src/App.tsx`
+changed.
+
+Tests: 1974 Rust (unchanged), 46 frontend (unchanged).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
