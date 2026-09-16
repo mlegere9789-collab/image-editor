@@ -5984,11 +5984,32 @@ fn clear_guides(state: State<'_, AppState>) -> Result<Snapshot, String> {
     })
 }
 
-/// View > New Guide Layout: `columns` × `rows` equal cells.
+/// View > New Guide Layout: `columns` × `rows` cells, with real margins
+/// and gutters.
 #[tauri::command]
-fn guide_layout(state: State<'_, AppState>, columns: u32, rows: u32) -> Result<Snapshot, String> {
+#[allow(clippy::too_many_arguments)]
+fn guide_layout(
+    state: State<'_, AppState>,
+    columns: u32,
+    rows: u32,
+    margin_top: u32,
+    margin_left: u32,
+    margin_bottom: u32,
+    margin_right: u32,
+    column_gutter: u32,
+    row_gutter: u32,
+) -> Result<Snapshot, String> {
     edit_checkpointed(&state, |document| {
-        document.guide_layout(columns, rows);
+        document.guide_layout(
+            columns,
+            rows,
+            margin_top,
+            margin_left,
+            margin_bottom,
+            margin_right,
+            column_gutter,
+            row_gutter,
+        );
         Ok(None)
     })
 }

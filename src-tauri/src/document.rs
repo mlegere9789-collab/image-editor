@@ -7600,19 +7600,56 @@ impl Document {
 
     /// View > New Guide Layout: divides the canvas into `columns` equal
     /// columns and `rows` equal rows, adding the interior boundaries as
-    /// guides (`columns − 1` vertical ones at `k × width / columns`,
-    /// rounded to the nearest pixel, and likewise for rows) on top of any
-    /// guides already there. Zero or one of either adds nothing on that
-    /// axis; Photoshop's gutters, margins, and per-column widths are
-    /// documented scope cuts.
-    pub fn guide_layout(&mut self, columns: u32, rows: u32) {
-        for k in 1..columns {
-            let x = (k as f32 * self.width as f32 / columns as f32).round() as u32;
-            let _ = self.add_guide(GuideOrientation::Vertical, x);
+    /// guides on top of any guides already there. `margin_top`,
+    /// `margin_left`, `margin_bottom`, and `margin_right` inset the
+    /// working area from the canvas edge before dividing it, matching
+    /// Photoshop's own real New Guide Layout dialog's four independent
+    /// Margin fields (confirmed directly against Adobe's own
+    /// documentation and tutorials, not assumed). `column_gutter` and
+    /// `row_gutter` are the real gap Photoshop's own dialog places
+    /// between adjacent columns/rows: each interior boundary becomes a
+    /// *pair* of guides — the trailing edge of one column/row and the
+    /// leading edge of the next — bounding that gutter's own gap, the
+    /// same "edges of each column" pairing Photoshop's own layout
+    /// produces; at gutter `0` the pair collapses onto the same pixel
+    /// and [`Self::add_guide`]'s own de-duplication makes it a single
+    /// guide, so `margin = 0, gutter = 0` reproduces this project's own
+    /// previous plain equal-division behaviour exactly. Zero or one
+    /// column/row adds nothing on that axis. Photoshop's own
+    /// "Center Columns" and "Clear Existing Guides" checkboxes remain a
+    /// documented scope cut.
+    #[allow(clippy::too_many_arguments)]
+    pub fn guide_layout(
+        &mut self,
+        columns: u32,
+        rows: u32,
+        margin_top: u32,
+        margin_left: u32,
+        margin_bottom: u32,
+        margin_right: u32,
+        column_gutter: u32,
+        row_gutter: u32,
+    ) {
+        let content_width = (self.width.saturating_sub(margin_left + margin_right)) as f32;
+        let total_column_gutter = column_gutter.saturating_mul(columns.saturating_sub(1)) as f32;
+        let column_width = (content_width - total_column_gutter) / columns.max(1) as f32;
+        for k in 0..columns.saturating_sub(1) {
+            let trailing = margin_left as f32
+                + (k + 1) as f32 * column_width
+                + k as f32 * column_gutter as f32;
+            let leading = trailing + column_gutter as f32;
+            let _ = self.add_guide(GuideOrientation::Vertical, trailing.round() as u32);
+            let _ = self.add_guide(GuideOrientation::Vertical, leading.round() as u32);
         }
-        for k in 1..rows {
-            let y = (k as f32 * self.height as f32 / rows as f32).round() as u32;
-            let _ = self.add_guide(GuideOrientation::Horizontal, y);
+        let content_height = (self.height.saturating_sub(margin_top + margin_bottom)) as f32;
+        let total_row_gutter = row_gutter.saturating_mul(rows.saturating_sub(1)) as f32;
+        let row_height = (content_height - total_row_gutter) / rows.max(1) as f32;
+        for k in 0..rows.saturating_sub(1) {
+            let trailing =
+                margin_top as f32 + (k + 1) as f32 * row_height + k as f32 * row_gutter as f32;
+            let leading = trailing + row_gutter as f32;
+            let _ = self.add_guide(GuideOrientation::Horizontal, trailing.round() as u32);
+            let _ = self.add_guide(GuideOrientation::Horizontal, leading.round() as u32);
         }
     }
 
@@ -44300,9 +44337,13 @@ mod tests {
     #[test]
     fn guide_layout_divides_the_canvas_evenly() {
         // Thirds of 9 are 3 and 6; halves of 6 is 3; a 4-column split of 9
-        // rounds 2.25 → 2, 4.5 → 5 (half away from zero), 6.75 → 7.
+        // rounds 2.25 → 2, 4.5 → 5 (half away from zero), 6.75 → 7. Zero
+        // margin and zero gutter throughout: each gutter pair collapses
+        // onto the same pixel, so add_guide's own de-duplication leaves
+        // exactly one guide per boundary, reproducing the old plain
+        // equal-division behaviour exactly.
         let mut doc = Document::new(9, 6).unwrap();
-        doc.guide_layout(3, 2);
+        doc.guide_layout(3, 2, 0, 0, 0, 0, 0, 0);
         assert_eq!(
             guides_of(&doc),
             vec![
@@ -44311,7 +44352,7 @@ mod tests {
                 (GuideOrientation::Horizontal, 3)
             ]
         );
-        doc.guide_layout(4, 0);
+        doc.guide_layout(4, 0, 0, 0, 0, 0, 0, 0);
         assert_eq!(
             guides_of(&doc)[3..],
             [
@@ -44320,8 +44361,41 @@ mod tests {
                 (GuideOrientation::Vertical, 7)
             ]
         );
-        doc.guide_layout(1, 1);
+        doc.guide_layout(1, 1, 0, 0, 0, 0, 0, 0);
         assert_eq!(guides_of(&doc).len(), 6);
+    }
+
+    #[test]
+    fn guide_layout_margin_insets_the_working_area_before_dividing() {
+        // A 20-wide canvas, 2 columns, asymmetric margins (left 4, right
+        // 0), no gutter. content_width = 20 - 4 - 0 = 16, column_width =
+        // 16 / 2 = 8. The one interior boundary sits at
+        // margin_left + column_width = 4 + 8 = 12 -- not the plain
+        // undivided-canvas midpoint of 10, a real, hand-verifiable
+        // consequence of the margin shifting the whole working area
+        // rather than just centring the same division.
+        let mut doc = Document::new(20, 10).unwrap();
+        doc.guide_layout(2, 1, 0, 4, 0, 0, 0, 0);
+        assert_eq!(guides_of(&doc), vec![(GuideOrientation::Vertical, 12)]);
+    }
+
+    #[test]
+    fn guide_layout_gutter_places_a_guide_pair_bounding_the_gap() {
+        // A 20-wide canvas, 2 columns, no margin, column gutter 4.
+        // content_width = 20, total_gutter = 4 * (2-1) = 4, column_width
+        // = (20-4) / 2 = 8. The interior boundary becomes a pair: the
+        // trailing edge of column 0 at column_width = 8, and the leading
+        // edge of column 1 at 8 + gutter = 12 -- two distinct guides
+        // bounding a real 4px gap, not one line down the middle.
+        let mut doc = Document::new(20, 10).unwrap();
+        doc.guide_layout(2, 1, 0, 0, 0, 0, 4, 0);
+        assert_eq!(
+            guides_of(&doc),
+            vec![
+                (GuideOrientation::Vertical, 8),
+                (GuideOrientation::Vertical, 12)
+            ]
+        );
     }
 
     #[test]

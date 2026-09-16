@@ -26177,6 +26177,56 @@ Tests: 1986 Rust (1985 → 1986, 1979 lib + 7 pipeline — one new
 `#[test]`; the four existing tests were updated in place, not added),
 51 frontend (unchanged).
 
+## Phase 455 — Guide Layout's real Margin and Gutter
+
+Guide Layout only ever divided the canvas into equal columns/rows with
+no way to inset from the edge or leave a gap between cells. Researched
+Photoshop's actual real New Guide Layout dialog first (two independent
+web searches this session, cross-checked against Adobe's own
+documentation and tutorials) and confirmed its real field set: Margin
+(four independent Top/Left/Bottom/Right values insetting the working
+area before dividing it) and Gutter (a real gap between adjacent
+columns/rows, rendered as guides marking "the edges of each column" —
+a genuine *pair* of guides bounding the gap, not one line down the
+middle). The row's own previous text claiming "per-column widths" as a
+scope cut was a misreading of the dialog — no source describes an
+independent per-column-width control distinct from the even division
+Number already provides — so that claim was corrected rather than
+implemented as a phantom feature.
+
+`Document::guide_layout` gains six new parameters:
+`margin_top`/`margin_left`/`margin_bottom`/`margin_right` inset the
+working rectangle before the column/row width is computed, and
+`column_gutter`/`row_gutter` subtract `(count - 1) * gutter` from the
+working size before dividing, then place each interior boundary as two
+guides — the trailing edge of one cell and the leading edge of the
+next, `gutter` pixels apart — rather than a single shared line. At
+`margin = 0, gutter = 0` each pair collapses onto the same pixel, and
+`add_guide`'s own existing de-duplication leaves exactly one guide per
+boundary, reproducing this project's own previous plain equal-division
+behaviour exactly — confirmed by running the existing
+`guide_layout_divides_the_canvas_evenly` test unchanged (only its own
+call sites gained six trailing zero arguments). The Guides dialog
+gained Margin Top/Left/Bottom/Right and Column/Row Gutter number
+fields, defaulting to 0 so existing muscle memory is unaffected unless
+a user actually sets one.
+
+**Verified two ways.** `guide_layout_margin_insets_the_working_area_before_dividing`
+uses an asymmetric margin (left 4, right 0) on a 20-wide, 2-column
+layout: the one interior boundary lands at `margin_left + column_width
+= 4 + 8 = 12`, not the plain-canvas midpoint of 10 — a real,
+hand-verifiable shift. `guide_layout_gutter_places_a_guide_pair_bounding_the_gap`
+uses a 4px column gutter on the same canvas: the boundary becomes two
+distinct guides at 8 and 12, a real 4px gap between them rather than
+one shared line. `cargo fmt --check`, `cargo clippy --all-targets -- -D
+warnings`, `cargo test` (full suite), `npx tsc --noEmit`, and `npm run
+build` all clean.
+
+Tests: 1988 Rust (1986 → 1988, 1981 lib + 7 pipeline — two new
+`#[test]`s; the existing divides-evenly test was updated in place, not
+added), 51 frontend (unchanged — the new dialog fields are plain
+number inputs, no new frontend-testable logic).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

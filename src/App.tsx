@@ -2367,6 +2367,12 @@ export default function App() {
   const [guidePosition, setGuidePosition] = useState(0);
   const [guideColumns, setGuideColumns] = useState(3);
   const [guideRows, setGuideRows] = useState(2);
+  const [guideMarginTop, setGuideMarginTop] = useState(0);
+  const [guideMarginLeft, setGuideMarginLeft] = useState(0);
+  const [guideMarginBottom, setGuideMarginBottom] = useState(0);
+  const [guideMarginRight, setGuideMarginRight] = useState(0);
+  const [guideColumnGutter, setGuideColumnGutter] = useState(0);
+  const [guideRowGutter, setGuideRowGutter] = useState(0);
   const [levelsEyedropper, setLevelsEyedropper] = useState<
     "black" | "gray" | "white" | null
   >(null);
@@ -29445,12 +29451,100 @@ export default function App() {
                 />
               </label>
             </div>
+            <div className="control control--row">
+              <label className="control">
+                <span className="control__label">Margin Top</span>
+                <input
+                  type="number"
+                  min={0}
+                  value={guideMarginTop}
+                  onChange={(event) =>
+                    setGuideMarginTop(
+                      Math.max(0, Math.round(Number(event.target.value))),
+                    )
+                  }
+                />
+              </label>
+              <label className="control">
+                <span className="control__label">Margin Left</span>
+                <input
+                  type="number"
+                  min={0}
+                  value={guideMarginLeft}
+                  onChange={(event) =>
+                    setGuideMarginLeft(
+                      Math.max(0, Math.round(Number(event.target.value))),
+                    )
+                  }
+                />
+              </label>
+              <label className="control">
+                <span className="control__label">Margin Bottom</span>
+                <input
+                  type="number"
+                  min={0}
+                  value={guideMarginBottom}
+                  onChange={(event) =>
+                    setGuideMarginBottom(
+                      Math.max(0, Math.round(Number(event.target.value))),
+                    )
+                  }
+                />
+              </label>
+              <label className="control">
+                <span className="control__label">Margin Right</span>
+                <input
+                  type="number"
+                  min={0}
+                  value={guideMarginRight}
+                  onChange={(event) =>
+                    setGuideMarginRight(
+                      Math.max(0, Math.round(Number(event.target.value))),
+                    )
+                  }
+                />
+              </label>
+            </div>
+            <div className="control control--row">
+              <label className="control">
+                <span className="control__label">Column Gutter</span>
+                <input
+                  type="number"
+                  min={0}
+                  value={guideColumnGutter}
+                  onChange={(event) =>
+                    setGuideColumnGutter(
+                      Math.max(0, Math.round(Number(event.target.value))),
+                    )
+                  }
+                />
+              </label>
+              <label className="control">
+                <span className="control__label">Row Gutter</span>
+                <input
+                  type="number"
+                  min={0}
+                  value={guideRowGutter}
+                  onChange={(event) =>
+                    setGuideRowGutter(
+                      Math.max(0, Math.round(Number(event.target.value))),
+                    )
+                  }
+                />
+              </label>
+            </div>
             <button
               className="button button--quiet"
               onClick={() =>
                 void runCommand("guide_layout", {
                   columns: guideColumns,
                   rows: guideRows,
+                  marginTop: guideMarginTop,
+                  marginLeft: guideMarginLeft,
+                  marginBottom: guideMarginBottom,
+                  marginRight: guideMarginRight,
+                  columnGutter: guideColumnGutter,
+                  rowGutter: guideRowGutter,
                 })
               }
               disabled={busy}
