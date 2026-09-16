@@ -3744,8 +3744,11 @@ pub enum Palette {
 }
 
 /// Image > Mode > Bitmap's Method: 50% Threshold, Pattern Dither (a 4×4
-/// Bayer matrix), Diffusion Dither (Floyd–Steinberg), or Halftone Screen
-/// (a classical amplitude-modulated dot screen — see [`Document::convert_mode`]).
+/// Bayer matrix), Diffusion Dither (Floyd–Steinberg), Halftone Screen (a
+/// classical amplitude-modulated Square dot screen), or Halftone Screen
+/// Diamond (the same amplitude-modulated screen with a Manhattan rather
+/// than Chebyshev distance metric, standing in for Photoshop's own
+/// Diamond dot shape — see [`Document::convert_mode`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub enum BitmapMethod {
@@ -3754,6 +3757,7 @@ pub enum BitmapMethod {
     PatternDither,
     DiffusionDither,
     HalftoneScreen,
+    HalftoneScreenDiamond,
 }
 
 /// The 4×4 Bayer ordered-dither matrix.
@@ -6767,14 +6771,19 @@ impl Document {
                                 }
                             }
                         }
-                        BitmapMethod::HalftoneScreen => {
+                        BitmapMethod::HalftoneScreen | BitmapMethod::HalftoneScreenDiamond => {
                             const CELL: f32 = 8.0;
+                            let diamond = matches!(method, BitmapMethod::HalftoneScreenDiamond);
                             for y in 0..height {
                                 for x in 0..width {
                                     let i = y * width + x;
                                     let dx = ((x as f32) % CELL) - (CELL - 1.0) / 2.0;
                                     let dy = ((y as f32) % CELL) - (CELL - 1.0) / 2.0;
-                                    let dist = dx.abs().max(dy.abs());
+                                    let dist = if diamond {
+                                        dx.abs() + dy.abs()
+                                    } else {
+                                        dx.abs().max(dy.abs())
+                                    };
                                     let darkness = 1.0 - lumas[i] as f32 / 255.0;
                                     let radius = darkness * (CELL / 2.0);
                                     on[i] = dist >= radius;
@@ -60764,6 +60773,34 @@ mod tests {
         for y in 0..8u32 {
             for x in 0..8u32 {
                 assert_eq!(pixel(&white, white_id, x, y)[0], 255, "({x}, {y})");
+            }
+        }
+    }
+
+    #[test]
+    fn bitmap_halftone_screen_diamond_grows_a_diamond_dot_instead_of_a_square() {
+        // Same 8x8 flat 128 grey fixture as the plain (Square) Halftone
+        // Screen test, same radius (508/255 = 1.9921568...), but the
+        // Diamond variant sums the axis distances (Manhattan) instead of
+        // taking their max (Chebyshev). Each axis distance from the
+        // cell's own centre index 3.5 is one of {3.5, 2.5, 1.5, 0.5} for
+        // columns/rows 0-3, mirrored for 4-7. The only column/row pairing
+        // whose sum (0.5 + 0.5 = 1.0) falls under the radius is columns
+        // {3, 4} paired with rows {3, 4} -- every other pairing's sum is
+        // at least 2.0, already past the radius -- so the dot is a plain
+        // 2x2 black square at the very centre of the cell, strictly
+        // smaller than the Square variant's own 4x4 dot at this same
+        // grey level, the real geometric consequence of a diamond
+        // (rhombus) covering less area than a square at the same "radius".
+        let mut doc = Document::new(8, 8).unwrap();
+        let id = doc.add_layer("l", &[128; 256], 8, 8).unwrap();
+        doc.convert_mode(ColorMode::Bitmap, Some(BitmapMethod::HalftoneScreenDiamond))
+            .unwrap();
+        for y in 0..8u32 {
+            for x in 0..8u32 {
+                let inside_dot = (3..=4).contains(&x) && (3..=4).contains(&y);
+                let expected = if inside_dot { 0 } else { 255 };
+                assert_eq!(pixel(&doc, id, x, y)[0], expected, "({x}, {y})");
             }
         }
     }

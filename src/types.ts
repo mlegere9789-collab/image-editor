@@ -445,7 +445,8 @@ export type BitmapMethod =
   | "threshold"
   | "patternDither"
   | "diffusionDither"
-  | "halftoneScreen";
+  | "halftoneScreen"
+  | "halftoneScreenDiamond";
 
 /** Mirrors `ColorProfile` in src-tauri/src/document.rs: Edit > Assign
  * Profile / Convert to Profile's real, minimal working spaces. */

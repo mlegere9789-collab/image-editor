@@ -25923,6 +25923,43 @@ Tests: 1976 Rust (1975 → 1976, 1969 lib + 7 pipeline), 51 frontend
 (unchanged — this phase is backend-only, reusing an already-wired
 frontend control).
 
+## Phase 450 — Bitmap Mode's Halftone Screen Diamond dot
+
+Image > Mode > Bitmap's Halftone Screen offered a single Square dot
+shape (Chebyshev distance from each 8×8 cell's own centre), standing in
+for Photoshop's own six real dot shapes. This phase adds a second,
+Diamond, the same amplitude-modulated screen with a Manhattan distance
+metric instead — a real geometric consequence, not just a relabelling:
+a diamond covers less area than a square at the same "radius", so the
+same grey level produces a visibly smaller dot.
+
+`BitmapMethod` gains a `HalftoneScreenDiamond` variant; the existing
+`HalftoneScreen` match arm now matches both variants and picks its
+distance metric with one `bool` (`dx.abs() + dy.abs()` for Diamond
+instead of `dx.abs().max(dy.abs())` for Square) — no new function, no
+new parameter. The Bitmap dialog's Method dropdown gained a "Halftone
+Screen (Diamond)" option alongside the existing one, now labelled
+"Halftone Screen (Square)" for clarity.
+
+**Verified two ways.** `bitmap_halftone_screen_diamond_grows_a_diamond_dot_instead_of_a_square`
+reuses the existing Square test's own 8×8 flat 128-grey fixture and
+radius (`508/255 = 1.9921568...`). Each axis distance from the cell's
+own centre is one of `{3.5, 2.5, 1.5, 0.5}`; the only column/row
+pairing whose Manhattan sum (`0.5 + 0.5 = 1.0`) falls under the radius
+is columns `{3, 4}` paired with rows `{3, 4}` — every other pairing's
+sum is at least `2.0`, already past the radius — so the dot is a plain
+2×2 black square at the very centre of the cell, provably smaller than
+the Square variant's own 4×4 dot at this same grey level (the existing
+`bitmap_halftone_screen_grows_a_square_dot_from_each_cells_own_centre`
+test, unchanged, still asserts that 4×4 result). `cargo fmt --check`,
+`cargo clippy --all-targets -- -D warnings`, `cargo test` (full suite,
+1970 lib + 7 pipeline), `npx tsc --noEmit`, and `npm run build` all
+clean.
+
+Tests: 1977 Rust (1976 → 1977, 1970 lib + 7 pipeline), 51 frontend
+(unchanged — this phase adds no new frontend-testable logic, only a
+dropdown option and a label rename).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
