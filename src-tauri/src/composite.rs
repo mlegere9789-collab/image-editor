@@ -1,0 +1,804 @@
+//! Flattens a [`Document`]'s layer stack into a single RGBA8 image.
+//!
+//! The math follows the W3C compositing spec: each layer is blended against the
+//! accumulated backdrop with its blend function, then composited with the
+//! `source-over` Porter-Duff operator.
+//!
+//! For a source with alpha `as` over a backdrop with alpha `ab`:
+//!
+//! ```text
+//! Cs' = (1 - ab) * Cs + ab * B(Cb, Cs)          // blend against the backdrop
+//! ao  = as + ab * (1 - as)                      // source-over alpha
+//! Co  = (as * Cs' + ab * Cb * (1 - as)) / ao    // back to non-premultiplied
+//! ```
+//!
+//! Accumulation happens in `f32` with non-premultiplied alpha, so repeated
+//! layers do not accumulate 8-bit rounding error. Values are quantized to `u8`
+//! once, at the end.
+
+use serde::{Deserialize, Serialize};
+
+use crate::document::{Document, Layer, CHANNELS};
+
+/// A flattened RGBA8 image.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Composite {
+    pub width: u32,
+    pub height: u32,
+    /// Non-premultiplied RGBA8, row-major, `width * height * 4` bytes.
+    pub pixels: Vec<u8>,
+}
+
+/// An axis-aligned pixel rectangle, `x0..x1` by `y0..y1` (half-open),
+/// already clamped to a document's bounds — see [`recomposite_region`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Rect {
+    pub x0: u32,
+    pub y0: u32,
+    pub x1: u32,
+    pub y1: u32,
+}
+
+/// Flatten every contributing layer, bottom to top.
+///
+/// Layers that are hidden or at zero opacity are skipped. A document with no
+/// contributing layers flattens to fully transparent pixels.
+///
+/// Pixels that end up fully transparent are emitted as `[0, 0, 0, 0]`: colour
+/// under zero alpha is not visible, so it is not carried into the result even
+/// when the source layer stored something there.
+pub fn flatten(document: &Document) -> Composite {
+    let width = document.width();
+    let height = document.height();
+    let mut pixels = vec![0u8; width as usize * height as usize * CHANNELS];
+    let layers = document.compositing_layers();
+    composite_rows_parallel(&layers, width, 0..height, 0..width, &mut pixels);
+    Composite {
+        width,
+        height,
+        pixels,
+    }
+}
+
+/// Rows below which a composite runs on one thread: the bands would cost
+/// more to hand out than to composite.
+const PARALLEL_MIN_ROWS: u32 = 64;
+
+/// Composites `rows` × `columns` of `layers` into `target` (a full
+/// `width`-wide RGBA buffer), splitting the rows into as many bands as
+/// there are cores and compositing each on its own thread — the whole
+/// point of a large file's edit not stalling the app (README Phase 360).
+/// Every pixel is computed by [`composite_layers_pixel`] exactly as the
+/// sequential loop did, so the result is byte-identical whatever the core
+/// count. Bands are disjoint row ranges of `target`, handed out with
+/// `chunks_mut`, so no two threads write the same byte.
+fn composite_rows_parallel(
+    layers: &[&Layer],
+    width: u32,
+    rows: std::ops::Range<u32>,
+    columns: std::ops::Range<u32>,
+    target: &mut [u8],
+) {
+    let row_count = rows.end.saturating_sub(rows.start);
+    if row_count == 0 || columns.is_empty() {
+        return;
+    }
+    let cores = std::thread::available_parallelism()
+        .map(|n| n.get() as u32)
+        .unwrap_or(1);
+    let bands = cores.min(row_count / PARALLEL_MIN_ROWS.max(1)).max(1);
+    let row_bytes = width as usize * CHANNELS;
+    let first = rows.start as usize * row_bytes;
+    let last = rows.end as usize * row_bytes;
+    let region = &mut target[first..last];
+    if bands <= 1 {
+        let origin = rows.start;
+        composite_rows(layers, width, rows, columns, region, origin);
+        return;
+    }
+    let rows_per_band = row_count.div_ceil(bands);
+    std::thread::scope(|scope| {
+        for (index, band) in region
+            .chunks_mut(rows_per_band as usize * row_bytes)
+            .enumerate()
+        {
+            let band_start = rows.start + index as u32 * rows_per_band;
+            let band_rows = (band.len() / row_bytes) as u32;
+            let columns = columns.clone();
+            scope.spawn(move || {
+                composite_rows(
+                    layers,
+                    width,
+                    band_start..band_start + band_rows,
+                    columns,
+                    band,
+                    band_start,
+                );
+            });
+        }
+    });
+}
+
+/// Composites `rows` × `columns` into `band`, a buffer whose first byte
+/// is row `band_origin` of the document.
+fn composite_rows(
+    layers: &[&Layer],
+    width: u32,
+    rows: std::ops::Range<u32>,
+    columns: std::ops::Range<u32>,
+    band: &mut [u8],
+    band_origin: u32,
+) {
+    for y in rows {
+        for x in columns.clone() {
+            let pixel = composite_layers_pixel(layers, width, x, y);
+            write_pixel(band, width, x, y - band_origin, pixel);
+        }
+    }
+}
+
+/// Recomposite just `rect` of `document`'s layer stack into `target` — a
+/// full document-sized (`width * height * 4` byte) RGBA8 buffer that already
+/// holds valid pixels for everywhere outside `rect`, e.g. one previously
+/// produced by [`flatten`]. Pixels inside `rect` are fully overwritten from
+/// scratch, the same as [`flatten`] does for the whole image; pixels outside
+/// it are untouched.
+///
+/// Used after a brush/eraser stroke, whose caller already knows exactly
+/// which pixels it touched (the stroke's own bounding box), so a small local
+/// edit does not have to re-flatten the entire document to stay correct.
+/// Every other edit (opacity, visibility, blend mode, a layer being added,
+/// removed, or reordered) can change any pixel in the composite, so those
+/// still go through a full [`flatten`].
+pub fn recomposite_region(document: &Document, rect: Rect, target: &mut [u8]) {
+    let width = document.width();
+    let layers = document.compositing_layers();
+    composite_rows_parallel(&layers, width, rect.y0..rect.y1, rect.x0..rect.x1, target);
+}
+
+/// Flatten just the layers at `indices` (bottom-to-top order, as in
+/// `document.layers()`) into one image, ignoring every other layer in the
+/// document entirely — including each included layer's own `visible` flag,
+/// since `indices` already says which ones to include. Opacity still
+/// applies, exactly like [`flatten`]. Used by
+/// [`crate::document::Document::merge_visible`] to pre-bake a subset of the
+/// stack into one new layer's pixels before those layers are removed.
+pub fn flatten_subset(document: &Document, indices: &[usize]) -> Composite {
+    let width = document.width();
+    let height = document.height();
+    let mut pixels = vec![0u8; width as usize * height as usize * CHANNELS];
+    let all = document.layers();
+    let layers: Vec<&Layer> = indices.iter().map(|&i| &all[i]).collect();
+    composite_rows_parallel(&layers, width, 0..height, 0..width, &mut pixels);
+    Composite {
+        width,
+        height,
+        pixels,
+    }
+}
+
+/// The flattened RGBA8 value of the single pixel `(x, y)` — what
+/// [`flatten`] would write there — without flattening anything else. For
+/// point readouts (the Color Sampler) that would otherwise re-flatten the
+/// whole document per sample. `(x, y)` must be on the canvas.
+pub fn composite_pixel(document: &Document, x: u32, y: u32) -> [u8; 4] {
+    let layers = document.compositing_layers();
+    let rgba = composite_layers_pixel(&layers, document.width(), x, y);
+    [
+        to_byte(rgba[0]),
+        to_byte(rgba[1]),
+        to_byte(rgba[2]),
+        to_byte(rgba[3]),
+    ]
+}
+
+/// The Properties panel's live Mask Density/Feather applied to `mask`'s
+/// stored byte at `(x, y)`: Feather first, a box blur of radius
+/// `mask_feather` clamped to `mask`'s own edges (the same clamp-to-edge
+/// shape [`crate::document`]'s brush/filter sampling already uses), then
+/// Density, which blends the (possibly feathered) value toward fully
+/// visible by `1.0 - mask_density` — `mask_density` `1.0` leaves it
+/// unchanged, `0.0` makes the mask invisible. `mask` is document-sized
+/// (`width * height` bytes); `height` is recovered from its own length so
+/// callers already holding only `width` (as [`composite_layers_pixel`]
+/// does) don't need to thread a second dimension through.
+pub(crate) fn effective_mask_value(
+    mask: &[u8],
+    width: u32,
+    x: u32,
+    y: u32,
+    mask_density: f32,
+    mask_feather: u32,
+) -> f32 {
+    let width = width as i64;
+    let height = mask.len() as i64 / width;
+    let raw = if mask_feather == 0 {
+        mask[(y as i64 * width + x as i64) as usize]
+    } else {
+        let r = mask_feather as i64;
+        let mut sum = 0u32;
+        let mut n = 0u32;
+        for dy in -r..=r {
+            let sy = (y as i64 + dy).clamp(0, height - 1);
+            for dx in -r..=r {
+                let sx = (x as i64 + dx).clamp(0, width - 1);
+                sum += u32::from(mask[(sy * width + sx) as usize]);
+                n += 1;
+            }
+        }
+        (sum as f32 / n as f32).round() as u8
+    };
+    1.0 - mask_density * (1.0 - to_unit(raw))
+}
+
+/// Composite one pixel `(x, y)` from `layers`, applied in the given
+/// iteration order: non-premultiplied RGBA in `0.0..=1.0`. The single place
+/// the blend math lives, shared by [`flatten`] (every contributing layer),
+/// [`recomposite_region`] (same layers, just a dirty rect), and
+/// [`flatten_subset`] (an arbitrary layer subset) — the caller decides which
+/// layers and in what order; this only does the accumulation.
+fn composite_layers_pixel(layers: &[&Layer], width: u32, x: u32, y: u32) -> [f32; 4] {
+    let width = width as usize;
+    let base = (y as usize * width + x as usize) * CHANNELS;
+
+    // Non-premultiplied RGBA, starting fully transparent.
+    let mut backdrop = [0f32; 4];
+    for (index, layer) in layers.iter().enumerate() {
+        // An adjustment layer has no pixels of its own: it reshapes the
+        // backdrop's colour by its strength — opacity, through its mask and
+        // clipping like any other layer — and leaves the alpha alone.
+        if let Some(adjustment) = layer.adjustment {
+            let mut strength = layer.opacity;
+            if let Some(mask) = &layer.mask {
+                strength *= effective_mask_value(
+                    mask,
+                    width as u32,
+                    x,
+                    y,
+                    layer.mask_density,
+                    layer.mask_feather,
+                );
+            }
+            if layer.clipped {
+                if let Some(clip_base) = layers[..index].iter().rev().find(|l| !l.clipped) {
+                    strength *= to_unit(clip_base.pixels[base + 3]);
+                }
+            }
+            if strength <= 0.0 || backdrop[3] <= 0.0 {
+                continue;
+            }
+            let adjusted = crate::document::apply_adjustment(
+                adjustment,
+                [
+                    to_byte(backdrop[0]),
+                    to_byte(backdrop[1]),
+                    to_byte(backdrop[2]),
+                ],
+            );
+            for (slot, &value) in backdrop.iter_mut().zip(adjusted.iter()) {
+                *slot += (to_unit(value) - *slot) * strength;
+            }
+            continue;
+        }
+        let mut source_alpha = to_unit(layer.pixels[base + 3]) * layer.opacity;
+        // A layer mask multiplies straight into the alpha.
+        if let Some(mask) = &layer.mask {
+            source_alpha *= effective_mask_value(
+                mask,
+                width as u32,
+                x,
+                y,
+                layer.mask_density,
+                layer.mask_feather,
+            );
+        }
+        // A clipping mask: a clipped layer shows only where its base — the
+        // nearest unclipped layer below it — has pixels, its alpha scaled
+        // by the base's own transparency (not the base's opacity).
+        if layer.clipped {
+            if let Some(clip_base) = layers[..index].iter().rev().find(|l| !l.clipped) {
+                source_alpha *= to_unit(clip_base.pixels[base + 3]);
+            }
+        }
+        if source_alpha <= 0.0 {
+            continue;
+        }
+        let backdrop_alpha = backdrop[3];
+        let out_alpha = source_alpha + backdrop_alpha * (1.0 - source_alpha);
+        if out_alpha <= 0.0 {
+            continue;
+        }
+
+        for (channel, slot) in backdrop.iter_mut().enumerate().take(3) {
+            let cs = to_unit(layer.pixels[base + channel]);
+            let cb = *slot;
+            // Where the backdrop is transparent there is nothing to blend
+            // against, so the source shows through unblended.
+            let blended =
+                (1.0 - backdrop_alpha) * cs + backdrop_alpha * layer.blend_mode.blend(cb, cs);
+            *slot =
+                (source_alpha * blended + backdrop_alpha * cb * (1.0 - source_alpha)) / out_alpha;
+        }
+        backdrop[3] = out_alpha;
+    }
+    backdrop
+}
+
+fn write_pixel(buf: &mut [u8], width: u32, x: u32, y: u32, rgba: [f32; 4]) {
+    let base = (y as usize * width as usize + x as usize) * CHANNELS;
+    buf[base] = to_byte(rgba[0]);
+    buf[base + 1] = to_byte(rgba[1]);
+    buf[base + 2] = to_byte(rgba[2]);
+    buf[base + 3] = to_byte(rgba[3]);
+}
+
+/// `u8` channel value to `0.0..=1.0`. Shared with [`crate::document`], whose
+/// brush and eraser strokes do the same non-premultiplied `source-over` math
+/// this module uses to flatten layers.
+pub(crate) fn to_unit(byte: u8) -> f32 {
+    f32::from(byte) / 255.0
+}
+
+pub(crate) fn to_byte(unit: f32) -> u8 {
+    // `round` then clamp: the arithmetic above can land a hair outside 0..=1.
+    (unit * 255.0).round().clamp(0.0, 255.0) as u8
+}
+
+#[cfg(test)]
+mod tests {
+    /// The sequential reference: every pixel through `composite_pixel`.
+    fn flatten_one_by_one(document: &Document) -> Vec<u8> {
+        let mut out = Vec::with_capacity((document.width() * document.height() * 4) as usize);
+        for y in 0..document.height() {
+            for x in 0..document.width() {
+                out.extend_from_slice(&composite_pixel(document, x, y));
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn a_parallel_flatten_is_byte_identical_to_the_sequential_one() {
+        // Tall enough for several bands (4 cores × 64 rows = 256, plus
+        // a remainder band), with masks, opacity, and blend modes in play.
+        let (w, h) = (37u32, 300u32);
+        let mut document = Document::new(w, h).unwrap();
+        let mut base = Vec::new();
+        let mut top = Vec::new();
+        for y in 0..h {
+            for x in 0..w {
+                let v = ((x * 7 + y * 3) % 256) as u8;
+                base.extend_from_slice(&[v, 255 - v, (x ^ y) as u8, 255]);
+                top.extend_from_slice(&[200, v, 40, ((x + y) % 3 * 100) as u8]);
+            }
+        }
+        document.add_layer("base", &base, w, h).unwrap();
+        let upper = document.add_layer("top", &top, w, h).unwrap();
+        document.set_opacity(upper, 0.6).unwrap();
+        document
+            .set_blend_mode(upper, crate::blend::BlendMode::Multiply)
+            .unwrap();
+        let flat = flatten(&document);
+        assert_eq!(flat.pixels, flatten_one_by_one(&document));
+        // A dirty rect recomposited in place agrees too, and touches
+        // nothing outside it.
+        let mut target = vec![7u8; (w * h * 4) as usize];
+        let rect = Rect {
+            x0: 5,
+            y0: 100,
+            x1: 30,
+            y1: 290,
+        };
+        recomposite_region(&document, rect, &mut target);
+        for y in 0..h {
+            for x in 0..w {
+                let i = ((y * w + x) * 4) as usize;
+                let inside = (rect.x0..rect.x1).contains(&x) && (rect.y0..rect.y1).contains(&y);
+                let expected: &[u8] = if inside {
+                    &flat.pixels[i..i + 4]
+                } else {
+                    &[7, 7, 7, 7]
+                };
+                assert_eq!(&target[i..i + 4], expected, "pixel ({x}, {y})");
+            }
+        }
+        // A tiny document takes the single-thread path and agrees as well.
+        let mut small = Document::new(3, 2).unwrap();
+        small.add_layer("s", &[9u8; 24], 3, 2).unwrap();
+        assert_eq!(flatten(&small).pixels, flatten_one_by_one(&small));
+    }
+
+    /// A large-file timing, run by hand: `cargo test --release
+    /// bench_large_file -- --ignored --nocapture`. Prints the flatten
+    /// and preview-encode times for a 4000×3000 three-layer document.
+    #[test]
+    #[ignore]
+    fn bench_large_file_composite_and_encode() {
+        let (w, h) = (4000u32, 3000u32);
+        let mut document = Document::new(w, h).unwrap();
+        for layer in 0..3u8 {
+            let mut px = Vec::with_capacity((w * h * 4) as usize);
+            for y in 0..h {
+                for x in 0..w {
+                    px.extend_from_slice(&[
+                        (x % 256) as u8,
+                        (y % 256) as u8,
+                        layer.wrapping_mul(90),
+                        if layer == 0 {
+                            255
+                        } else {
+                            ((x + y) % 200) as u8
+                        },
+                    ]);
+                }
+            }
+            document.add_layer(format!("l{layer}"), &px, w, h).unwrap();
+        }
+        let started = std::time::Instant::now();
+        let flat = flatten(&document);
+        let flattened = started.elapsed();
+        let layers = document.compositing_layers();
+        let mut sequential = vec![0u8; (w * h * 4) as usize];
+        let started = std::time::Instant::now();
+        composite_rows(&layers, w, 0..h, 0..w, &mut sequential, 0);
+        let flattened_sequential = started.elapsed();
+        assert_eq!(sequential, flat.pixels);
+        let started = std::time::Instant::now();
+        let default = crate::png::encode(&flat).unwrap();
+        let encoded_default = started.elapsed();
+        let started = std::time::Instant::now();
+        let preview = crate::png::encode_preview(&flat).unwrap();
+        let encoded_preview = started.elapsed();
+        let cores = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1);
+        eprintln!(
+            "BENCH cores={cores} flatten_sequential={flattened_sequential:?} flatten_parallel={flattened:?} encode_default={encoded_default:?} ({} bytes) encode_preview={encoded_preview:?} ({} bytes)",
+            default.len(),
+            preview.len()
+        );
+    }
+
+    use super::*;
+    use crate::blend::BlendMode;
+    use crate::document::MoveDirection;
+
+    fn solid(width: u32, height: u32, rgba: [u8; 4]) -> Vec<u8> {
+        rgba.iter()
+            .copied()
+            .cycle()
+            .take(width as usize * height as usize * CHANNELS)
+            .collect()
+    }
+
+    /// A 1x1 document, the smallest thing that exercises the full pipeline.
+    fn dot(layers: &[([u8; 4], f32, bool, BlendMode)]) -> [u8; 4] {
+        let mut doc = Document::new(1, 1).unwrap();
+        for (index, &(rgba, opacity, visible, mode)) in layers.iter().enumerate() {
+            let id = doc
+                .add_layer(format!("layer {index}"), &solid(1, 1, rgba), 1, 1)
+                .unwrap();
+            doc.set_opacity(id, opacity).unwrap();
+            doc.set_visible(id, visible).unwrap();
+            doc.set_blend_mode(id, mode).unwrap();
+        }
+        let out = flatten(&doc);
+        [out.pixels[0], out.pixels[1], out.pixels[2], out.pixels[3]]
+    }
+
+    /// Allow one 8-bit step of quantization slack.
+    fn near(actual: [u8; 4], expected: [u8; 4]) -> bool {
+        actual
+            .iter()
+            .zip(expected.iter())
+            .all(|(a, e)| a.abs_diff(*e) <= 1)
+    }
+
+    macro_rules! assert_near {
+        ($actual:expr, $expected:expr) => {{
+            let actual = $actual;
+            let expected = $expected;
+            assert!(
+                near(actual, expected),
+                "expected {expected:?}, got {actual:?}"
+            );
+        }};
+    }
+
+    const OPAQUE: f32 = 1.0;
+    const SHOWN: bool = true;
+    const HIDDEN: bool = false;
+    use BlendMode::Normal;
+
+    #[test]
+    fn an_empty_document_flattens_to_transparent() {
+        let doc = Document::new(3, 2).unwrap();
+        let out = flatten(&doc);
+        assert_eq!((out.width, out.height), (3, 2));
+        assert_eq!(out.pixels, vec![0u8; 3 * 2 * 4]);
+    }
+
+    #[test]
+    fn output_dimensions_match_the_document() {
+        let mut doc = Document::new(5, 7).unwrap();
+        doc.add_layer("a", &solid(5, 7, [1, 2, 3, 255]), 5, 7)
+            .unwrap();
+        let out = flatten(&doc);
+        assert_eq!((out.width, out.height), (5, 7));
+        assert_eq!(out.pixels.len(), 5 * 7 * 4);
+    }
+
+    #[test]
+    fn a_single_opaque_layer_passes_through_unchanged() {
+        assert_near!(
+            dot(&[([200, 100, 50, 255], OPAQUE, SHOWN, Normal)]),
+            [200, 100, 50, 255]
+        );
+    }
+
+    #[test]
+    fn a_hidden_layer_contributes_nothing() {
+        assert_near!(
+            dot(&[
+                ([255, 0, 0, 255], OPAQUE, SHOWN, Normal),
+                ([0, 255, 0, 255], OPAQUE, HIDDEN, Normal),
+            ]),
+            [255, 0, 0, 255]
+        );
+    }
+
+    #[test]
+    fn a_zero_opacity_layer_contributes_nothing() {
+        assert_near!(
+            dot(&[
+                ([255, 0, 0, 255], OPAQUE, SHOWN, Normal),
+                ([0, 255, 0, 255], 0.0, SHOWN, Normal),
+            ]),
+            [255, 0, 0, 255]
+        );
+    }
+
+    #[test]
+    fn a_fully_transparent_source_leaves_the_backdrop_alone() {
+        assert_near!(
+            dot(&[
+                ([10, 20, 30, 255], OPAQUE, SHOWN, Normal),
+                ([99, 99, 99, 0], OPAQUE, SHOWN, Normal),
+            ]),
+            [10, 20, 30, 255]
+        );
+    }
+
+    #[test]
+    fn half_opacity_white_over_black_is_mid_grey() {
+        assert_near!(
+            dot(&[
+                ([0, 0, 0, 255], OPAQUE, SHOWN, Normal),
+                ([255, 255, 255, 255], 0.5, SHOWN, Normal),
+            ]),
+            [128, 128, 128, 255]
+        );
+    }
+
+    #[test]
+    fn layer_alpha_and_layer_opacity_multiply() {
+        // A 50%-alpha white pixel at 50% layer opacity == 25% coverage.
+        assert_near!(
+            dot(&[
+                ([0, 0, 0, 255], OPAQUE, SHOWN, Normal),
+                ([255, 255, 255, 128], 0.5, SHOWN, Normal),
+            ]),
+            [64, 64, 64, 255]
+        );
+    }
+
+    #[test]
+    fn stacking_order_matters() {
+        let red_over_green = dot(&[
+            ([0, 255, 0, 255], OPAQUE, SHOWN, Normal),
+            ([255, 0, 0, 255], OPAQUE, SHOWN, Normal),
+        ]);
+        let green_over_red = dot(&[
+            ([255, 0, 0, 255], OPAQUE, SHOWN, Normal),
+            ([0, 255, 0, 255], OPAQUE, SHOWN, Normal),
+        ]);
+        assert_near!(red_over_green, [255, 0, 0, 255]);
+        assert_near!(green_over_red, [0, 255, 0, 255]);
+    }
+
+    #[test]
+    fn reordering_layers_changes_the_composite() {
+        let mut doc = Document::new(1, 1).unwrap();
+        let bottom = doc
+            .add_layer("b", &solid(1, 1, [255, 0, 0, 255]), 1, 1)
+            .unwrap();
+        doc.add_layer("t", &solid(1, 1, [0, 255, 0, 255]), 1, 1)
+            .unwrap();
+        assert_eq!(&flatten(&doc).pixels[..], &[0, 255, 0, 255]);
+
+        doc.move_layer(bottom, MoveDirection::Up).unwrap();
+        assert_eq!(&flatten(&doc).pixels[..], &[255, 0, 0, 255]);
+    }
+
+    #[test]
+    fn multiply_darkens_against_the_backdrop() {
+        // 0.5 * 0.5 == 0.25 -> 64
+        assert_near!(
+            dot(&[
+                ([128, 128, 128, 255], OPAQUE, SHOWN, Normal),
+                ([128, 128, 128, 255], OPAQUE, SHOWN, BlendMode::Multiply),
+            ]),
+            [64, 64, 64, 255]
+        );
+    }
+
+    #[test]
+    fn screen_lightens_against_the_backdrop() {
+        // 0.5 + 0.5 - 0.25 == 0.75 -> 191
+        assert_near!(
+            dot(&[
+                ([128, 128, 128, 255], OPAQUE, SHOWN, Normal),
+                ([128, 128, 128, 255], OPAQUE, SHOWN, BlendMode::Screen),
+            ]),
+            [191, 191, 191, 255]
+        );
+    }
+
+    #[test]
+    fn difference_of_a_layer_with_itself_is_black() {
+        assert_near!(
+            dot(&[
+                ([200, 100, 50, 255], OPAQUE, SHOWN, Normal),
+                ([200, 100, 50, 255], OPAQUE, SHOWN, BlendMode::Difference),
+            ]),
+            [0, 0, 0, 255]
+        );
+    }
+
+    #[test]
+    fn blend_modes_have_no_effect_over_a_transparent_backdrop() {
+        // With nothing underneath, every mode must show the source as-is —
+        // there is no backdrop to blend against.
+        for mode in BlendMode::ALL {
+            assert_near!(
+                dot(&[([200, 100, 50, 255], OPAQUE, SHOWN, mode)]),
+                [200, 100, 50, 255]
+            );
+        }
+    }
+
+    #[test]
+    fn the_bottom_layer_alpha_is_preserved() {
+        // A half-transparent lone layer stays half-transparent.
+        assert_near!(
+            dot(&[([255, 0, 0, 128], OPAQUE, SHOWN, Normal)]),
+            [255, 0, 0, 128]
+        );
+    }
+
+    #[test]
+    fn two_half_alpha_layers_accumulate_alpha_correctly() {
+        // ao = 0.5 + 0.5 * (1 - 0.5) = 0.75 -> 191
+        let out = dot(&[
+            ([255, 0, 0, 128], OPAQUE, SHOWN, Normal),
+            ([0, 0, 255, 128], OPAQUE, SHOWN, Normal),
+        ]);
+        assert!(out[3].abs_diff(191) <= 1, "alpha was {}", out[3]);
+    }
+
+    #[test]
+    fn per_pixel_independence_is_respected() {
+        // Two pixels with different content must not leak into each other.
+        let mut doc = Document::new(2, 1).unwrap();
+        let mut base = vec![0u8; 8];
+        base[0..4].copy_from_slice(&[255, 0, 0, 255]);
+        base[4..8].copy_from_slice(&[0, 0, 255, 255]);
+        doc.add_layer("base", &base, 2, 1).unwrap();
+
+        let out = flatten(&doc);
+        assert_eq!(&out.pixels[0..4], &[255, 0, 0, 255]);
+        assert_eq!(&out.pixels[4..8], &[0, 0, 255, 255]);
+    }
+
+    #[test]
+    fn many_stacked_layers_stay_in_range() {
+        // Guards against f32 drift or overflow pushing a channel past 255.
+        let mut doc = Document::new(1, 1).unwrap();
+        for (index, mode) in BlendMode::ALL.into_iter().enumerate() {
+            let id = doc
+                .add_layer(format!("l{index}"), &solid(1, 1, [180, 90, 200, 200]), 1, 1)
+                .unwrap();
+            doc.set_blend_mode(id, mode).unwrap();
+            doc.set_opacity(id, 0.7).unwrap();
+        }
+        let out = flatten(&doc);
+        assert_eq!(out.pixels.len(), 4);
+        // Reaching here without a panic plus a valid alpha is the assertion; u8
+        // cannot represent an out-of-range value, so the clamp is what is tested.
+        assert!(out.pixels[3] > 0);
+    }
+
+    #[test]
+    fn recompositing_a_region_matches_a_full_flatten_inside_it() {
+        // Two 4x4 layers, one Multiply on top, so there is real blend math to
+        // get right, not just a pass-through.
+        let mut doc = Document::new(4, 4).unwrap();
+        doc.add_layer("base", &solid(4, 4, [200, 150, 50, 255]), 4, 4)
+            .unwrap();
+        let top = doc
+            .add_layer("top", &solid(4, 4, [100, 100, 100, 180]), 4, 4)
+            .unwrap();
+        doc.set_blend_mode(top, BlendMode::Multiply).unwrap();
+
+        let full = flatten(&doc);
+        let mut target = vec![0u8; full.pixels.len()];
+        recomposite_region(
+            &doc,
+            Rect {
+                x0: 1,
+                y0: 1,
+                x1: 3,
+                y1: 3,
+            },
+            &mut target,
+        );
+
+        for y in 1..3 {
+            for x in 1..3 {
+                let base = (y * 4 + x) * CHANNELS;
+                assert_eq!(
+                    &target[base..base + CHANNELS],
+                    &full.pixels[base..base + CHANNELS],
+                    "pixel ({x},{y}) inside the region should match a full flatten"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn recompositing_a_region_leaves_pixels_outside_it_untouched() {
+        let mut doc = Document::new(4, 4).unwrap();
+        doc.add_layer("base", &solid(4, 4, [10, 20, 30, 255]), 4, 4)
+            .unwrap();
+
+        // Pre-seed the target with a sentinel value nothing in the document
+        // could ever produce, so any write outside the rect is unmistakable.
+        let mut target = vec![9u8; 4 * 4 * CHANNELS];
+        recomposite_region(
+            &doc,
+            Rect {
+                x0: 1,
+                y0: 1,
+                x1: 2,
+                y1: 2,
+            },
+            &mut target,
+        );
+
+        // The one pixel inside the 1x1 rect, at row 1 col 1 of a 4-wide
+        // image, changed...
+        let inside = 5 * CHANNELS;
+        assert_eq!(&target[inside..inside + CHANNELS], &[10, 20, 30, 255]);
+        // ...but a pixel outside it did not.
+        assert_eq!(&target[0..CHANNELS], &[9, 9, 9, 9]);
+    }
+
+    #[test]
+    fn an_empty_region_touches_nothing() {
+        let mut doc = Document::new(2, 2).unwrap();
+        doc.add_layer("base", &solid(2, 2, [1, 2, 3, 255]), 2, 2)
+            .unwrap();
+        let mut target = vec![9u8; 2 * 2 * CHANNELS];
+        recomposite_region(
+            &doc,
+            Rect {
+                x0: 1,
+                y0: 1,
+                x1: 1,
+                y1: 1,
+            },
+            &mut target,
+        );
+        assert_eq!(target, vec![9u8; 2 * 2 * CHANNELS]);
+    }
+}
