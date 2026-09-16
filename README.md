@@ -25721,6 +25721,49 @@ refactored delegation. `cargo fmt`/`clippy --all-targets -D warnings`/
 Tests: 1972 Rust (a tenth case added to the same existing test, count
 unchanged), 46 frontend (unchanged).
 
+## Phase 445 — Bitmap Mode's Halftone Screen
+
+Resolved one piece of Bitmap Mode's own documented scope cut: a fourth
+Method alongside 50% Threshold, Pattern Dither, and Diffusion Dither —
+Halftone Screen, the classical amplitude-modulated dot screen real
+print halftoning uses. Photoshop's own dialog asks for Frequency,
+Angle, and a choice of six dot shapes; this fixes a Square dot on an
+unrotated 8×8-pixel cell grid, a deliberate simplification in the same
+spirit as this project's other "one shape/rule stands in for several"
+choices (Paint Bucket's fixed tolerance, Posterize's UI cap), chosen
+specifically because Chebyshev distance keeps every value in the
+formula an exact multiple of `0.5`, making the whole thing hand-provable
+rather than needing a Python cross-check for a Euclidean (round) dot.
+
+`BitmapMethod` gains a `HalftoneScreen` variant; `convert_mode`'s
+Bitmap branch gains a new match arm: for each pixel, its distance from
+its own cell's centre (`max(|dx|, |dy|)`, Chebyshev, cell size fixed at
+8) is compared against a radius that grows linearly with how dark the
+pixel is (`(1 − luma/255) × 4.0`, half the cell width at pure black) —
+white outside that radius, black inside it, so a fully dark cell is
+entirely covered and a fully light one is bare. No `lib.rs` change
+needed: `convert_mode`'s `method` parameter already threads any
+`BitmapMethod` straight through.
+
+Two new hand-computed tests. The main one: an 8×8 flat 128-grey layer,
+one full screen cell — each axis' own distance from the cell centre
+(index 3.5) is one of `{3.5, 2.5, 1.5, 0.5}` for columns/rows 0-3,
+mirrored for 4-7; the dot's own radius at grey 128 is exactly
+`508/255 = 1.9921568...`, sitting cleanly between `1.5` and `2.5` with
+no value anywhere near that boundary, so a pixel is inside the dot
+(black) only where both its column and row distance are `1.5` or
+`0.5` — columns and rows 2 through 5 — giving a solid 4×4 black square
+centred in the cell with a white border all around it, verified pixel
+by pixel. A second test confirms the two extremes: full black (radius
+`4.0`, strictly past any distance's own maximum of `3.5`) is solid
+black, and full white (radius `0.0`, which no distance — minimum `0.5`
+— can ever be less than) is solid white. The frontend's `BitmapMethod`
+type and the Bitmap dialog's Method select both gained the new option.
+`cargo fmt`/`clippy --all-targets -D warnings`/`test` and `npx tsc
+--noEmit`/`npm run build`/`npm test` all clean.
+
+Tests: 1974 Rust (1972 → 1974: two new tests), 46 frontend (unchanged).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

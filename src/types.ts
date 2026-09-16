@@ -441,7 +441,11 @@ export type Palette =
   | { kind: "exact" }
   | { kind: "uniform" }
   | { kind: "adaptive"; colors: number };
-export type BitmapMethod = "threshold" | "patternDither" | "diffusionDither";
+export type BitmapMethod =
+  | "threshold"
+  | "patternDither"
+  | "diffusionDither"
+  | "halftoneScreen";
 
 /** Mirrors `ColorProfile` in src-tauri/src/document.rs: Edit > Assign
  * Profile / Convert to Profile's real, minimal working spaces. */

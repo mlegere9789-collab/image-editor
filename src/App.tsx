@@ -20962,6 +20962,7 @@ export default function App() {
                 <option value="threshold">50% Threshold</option>
                 <option value="patternDither">Pattern Dither</option>
                 <option value="diffusionDither">Diffusion Dither</option>
+                <option value="halftoneScreen">Halftone Screen</option>
               </select>
             </label>
             <div className="modal__actions">

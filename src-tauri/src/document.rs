@@ -3744,7 +3744,8 @@ pub enum Palette {
 }
 
 /// Image > Mode > Bitmap's Method: 50% Threshold, Pattern Dither (a 4×4
-/// Bayer matrix), or Diffusion Dither (Floyd–Steinberg).
+/// Bayer matrix), Diffusion Dither (Floyd–Steinberg), or Halftone Screen
+/// (a classical amplitude-modulated dot screen — see [`Document::convert_mode`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub enum BitmapMethod {
@@ -3752,6 +3753,7 @@ pub enum BitmapMethod {
     Threshold,
     PatternDither,
     DiffusionDither,
+    HalftoneScreen,
 }
 
 /// The 4×4 Bayer ordered-dither matrix.
@@ -6650,14 +6652,26 @@ impl Document {
     /// threshold `((2M + 1)·255 + 16) / 32` for the pixel's cell; Diffusion
     /// Dither is Floyd–Steinberg in integers, each pixel's error `old −
     /// new` spread `7/16` right, `3/16` down-left, `5/16` down, `1/16`
-    /// down-right, truncated toward zero, per layer. RGB Color only sets
+    /// down-right, truncated toward zero, per layer; Halftone Screen tiles
+    /// the layer into fixed 8×8-pixel cells and grows a black Square dot
+    /// from each cell's own centre as the pixel darkens — Chebyshev
+    /// distance from the cell centre (`max(|dx|, |dy|)`, an unrotated
+    /// square dot rather than Photoshop's own default round one) compared
+    /// against `(1 − luma / 255) × 4.0`, the cell's own half-width scaled
+    /// by how dark the pixel is, white outside that radius and black
+    /// inside it — so a solid black cell would be entirely covered and a
+    /// solid white one bare. Photoshop's own Frequency and Angle sliders,
+    /// and five of its six dot shapes (Round, Diamond, Ellipse, Line,
+    /// Cross), are documented scope cuts; Square alone, on a fixed
+    /// unrotated grid, keeps the same classical amplitude-modulated
+    /// mechanism testable with exact arithmetic. RGB Color only sets
     /// the mode: a grey or bitmap stays as it is, ready for colour. Layer
     /// masks and alpha channels are untouched. Photoshop's Bitmap dialog
-    /// also offers output resolution, a halftone screen, and a custom
-    /// pattern, and its Grayscale conversion offers a size ratio — all
-    /// documented scope cuts. Indexed Color here is Exact when the image
-    /// has at most 256 colours and Uniform otherwise; the dialog's own
-    /// palette choice goes through [`Self::convert_to_indexed`].
+    /// also offers output resolution and a custom pattern, and its
+    /// Grayscale conversion offers a size ratio — documented scope cuts.
+    /// Indexed Color here is Exact when the image has at most 256 colours
+    /// and Uniform otherwise; the dialog's own palette choice goes through
+    /// [`Self::convert_to_indexed`].
     pub fn convert_mode(
         &mut self,
         mode: ColorMode,
@@ -6749,6 +6763,20 @@ impl Document {
                                             lumas[i + width + 1] += error / 16;
                                         }
                                     }
+                                }
+                            }
+                        }
+                        BitmapMethod::HalftoneScreen => {
+                            const CELL: f32 = 8.0;
+                            for y in 0..height {
+                                for x in 0..width {
+                                    let i = y * width + x;
+                                    let dx = ((x as f32) % CELL) - (CELL - 1.0) / 2.0;
+                                    let dy = ((y as f32) % CELL) - (CELL - 1.0) / 2.0;
+                                    let dist = dx.abs().max(dy.abs());
+                                    let darkness = 1.0 - lumas[i] as f32 / 255.0;
+                                    let radius = darkness * (CELL / 2.0);
+                                    on[i] = dist >= radius;
                                 }
                             }
                         }
@@ -60603,6 +60631,60 @@ mod tests {
         assert_eq!(pixel(&doc, id, 1, 0)[0], 255);
         assert_eq!(pixel(&doc, id, 0, 1)[0], 0);
         assert_eq!(pixel(&doc, id, 1, 1)[0], 0);
+    }
+
+    #[test]
+    fn bitmap_halftone_screen_grows_a_square_dot_from_each_cells_own_centre() {
+        // An 8x8 flat 128 grey, one full screen cell: each axis' distance
+        // from the cell's own centre index 3.5 is one of {3.5, 2.5, 1.5,
+        // 0.5} for columns/rows 0-3 and mirrors it for 4-7 (column 4 is
+        // 0.5 away, same as column 3). The dot's own radius at grey 128 is
+        // (1 - 128/255) * 4.0 = 508/255 = 1.9921568... exactly between
+        // 1.5 and 2.5, so a pixel is inside the dot (black) only where
+        // both its column and row distance are 1.5 or 0.5 -- columns and
+        // rows 2 through 5 -- and outside (white) the moment either
+        // distance reaches 2.5, giving a solid 4x4 black square centred
+        // in the 8x8 cell with a white border all around it.
+        let mut doc = Document::new(8, 8).unwrap();
+        let id = doc.add_layer("l", &[128; 256], 8, 8).unwrap();
+        doc.convert_mode(ColorMode::Bitmap, Some(BitmapMethod::HalftoneScreen))
+            .unwrap();
+        for y in 0..8u32 {
+            for x in 0..8u32 {
+                let inside_dot = (2..=5).contains(&x) && (2..=5).contains(&y);
+                let expected = if inside_dot { 0 } else { 255 };
+                assert_eq!(pixel(&doc, id, x, y)[0], expected, "({x}, {y})");
+            }
+        }
+    }
+
+    #[test]
+    fn bitmap_halftone_screen_at_the_extremes_is_solid_black_or_solid_white() {
+        // Full black (luma 0) gives every pixel the maximum radius, 4.0 --
+        // strictly greater than any in-cell distance's own maximum, 3.5 --
+        // so every pixel is inside the dot: solid black. Full white
+        // (luma 255) gives radius 0.0, which no distance (minimum 0.5) can
+        // ever be less than: every pixel is outside the dot, solid white.
+        let mut black = Document::new(8, 8).unwrap();
+        let black_id = black.add_layer("l", &[0; 256], 8, 8).unwrap();
+        black
+            .convert_mode(ColorMode::Bitmap, Some(BitmapMethod::HalftoneScreen))
+            .unwrap();
+        for y in 0..8u32 {
+            for x in 0..8u32 {
+                assert_eq!(pixel(&black, black_id, x, y)[0], 0, "({x}, {y})");
+            }
+        }
+        let mut white = Document::new(8, 8).unwrap();
+        let white_id = white.add_layer("l", &[255; 256], 8, 8).unwrap();
+        white
+            .convert_mode(ColorMode::Bitmap, Some(BitmapMethod::HalftoneScreen))
+            .unwrap();
+        for y in 0..8u32 {
+            for x in 0..8u32 {
+                assert_eq!(pixel(&white, white_id, x, y)[0], 255, "({x}, {y})");
+            }
+        }
     }
 
     #[test]
