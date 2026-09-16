@@ -25393,6 +25393,42 @@ pre-existing tests pass unmodified against the refactored delegation.
 Tests: 1972 Rust (another case added to the same existing test, count
 unchanged), 46 frontend (unchanged).
 
+## Phase 437 — Adjustment Layer's Photo Filter
+
+A third kind off Adjustment Layer's own documented scope cut, same
+template as Phases 435-436: Photo Filter is also a pure per-pixel
+function (a per-channel lerp toward a fixed colour, no external state),
+so it slots into `Adjustment`/`apply_adjustment` the same way.
+
+`document.rs`'s `Adjustment` enum gains a `PhotoFilter { color: [u8; 3],
+density: u8 }` variant; `apply_adjustment` gains a match arm carrying
+`photo_filter`'s own exact formula — each channel's own `0.0..=1.0`
+value lerped toward the filter colour's by `density` percent. The
+destructive `photo_filter` command is now a thin call onto
+`Adjustment::PhotoFilter` through `adjust_with`, the same refactor
+`color_balance` and `exposure` already went through. No `lib.rs`
+change needed.
+
+The frontend's `Adjustment` type gains the matching `photoFilter`
+variant; the Adjustment Layer dialog gains a Photo Filter option
+reusing the standalone Photo Filter dialog's own `photoFilterColor`/
+`photoFilterDensity` state (the colour converted through the existing
+`hexToRgb`) rather than duplicating either.
+
+Extended `adjustment_layers_match_their_destructive_commands`
+(compiler-enforced exhaustive over `Adjustment` again) with a seventh
+case: Photo Filter toward white (`[255, 255, 255]`) at density 40 on
+the suite's own base pixel (200, 100, 50) lerps each channel 40% of the
+way to 1.0 — `200/255 * 0.6 + 0.4 = 222/255` exactly → 222; `100/255 *
+0.6 + 0.4 = 162/255` exactly → 162; `50/255 * 0.6 + 0.4 = 132/255`
+exactly → 132. All 8 of `photo_filter`'s own pre-existing tests pass
+unmodified against the refactored delegation. `cargo fmt`/`clippy
+--all-targets -D warnings`/`test` and `npx tsc --noEmit`/`npm run
+build`/`npm test` all clean.
+
+Tests: 1972 Rust (a third case added to the same existing test, count
+unchanged), 46 frontend (unchanged).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

@@ -643,6 +643,8 @@ function adjustmentKindLabel(kind: Adjustment["kind"]): string {
       return "Color Balance";
     case "exposure":
       return "Exposure";
+    case "photoFilter":
+      return "Photo Filter";
     default:
       return "Invert";
   }
@@ -6753,6 +6755,12 @@ export default function App() {
           offset: exposureOffset,
           gamma: exposureGamma,
         };
+      case "photoFilter":
+        return {
+          kind: "photoFilter",
+          color: hexToRgb(photoFilterColor),
+          density: photoFilterDensity,
+        };
       default:
         return { kind: "invert" };
     }
@@ -6771,6 +6779,8 @@ export default function App() {
     exposureStops,
     exposureOffset,
     exposureGamma,
+    photoFilterColor,
+    photoFilterDensity,
   ]);
 
   const addAdjustmentLayer = useCallback(async () => {
@@ -27746,8 +27756,41 @@ export default function App() {
                 <option value="hueSaturation">Hue/Saturation</option>
                 <option value="colorBalance">Color Balance</option>
                 <option value="exposure">Exposure</option>
+                <option value="photoFilter">Photo Filter</option>
               </select>
             </label>
+            {adjustmentKind === "photoFilter" && (
+              <>
+                <label className="control control--row">
+                  <span className="control__label">Filter Color</span>
+                  <input
+                    type="color"
+                    className="tools__color"
+                    value={photoFilterColor}
+                    onChange={(event) =>
+                      setPhotoFilterColor(event.target.value)
+                    }
+                  />
+                </label>
+                <label className="control">
+                  <span className="control__label">
+                    Density
+                    <span className="control__value">
+                      {photoFilterDensity}%
+                    </span>
+                  </span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={photoFilterDensity}
+                    onChange={(event) =>
+                      setPhotoFilterDensity(Number(event.target.value))
+                    }
+                  />
+                </label>
+              </>
+            )}
             {adjustmentKind === "exposure" && (
               <>
                 <label className="control">

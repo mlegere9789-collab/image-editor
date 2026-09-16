@@ -224,7 +224,8 @@ export type Adjustment =
       midtones: [number, number, number];
       highlights: [number, number, number];
     }
-  | { kind: "exposure"; exposure: number; offset: number; gamma: number };
+  | { kind: "exposure"; exposure: number; offset: number; gamma: number }
+  | { kind: "photoFilter"; color: [number, number, number]; density: number };
 
 /** Mirrors `NeuralFilterKind` in src-tauri/src/document.rs (serde
  * camelCase, fieldless variants so each serializes as a bare string) — a

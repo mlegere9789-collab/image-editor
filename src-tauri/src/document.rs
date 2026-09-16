@@ -807,6 +807,10 @@ pub enum Adjustment {
         offset: i32,
         gamma: i32,
     },
+    PhotoFilter {
+        color: [u8; 3],
+        density: u8,
+    },
 }
 
 impl Adjustment {
@@ -3919,7 +3923,9 @@ pub enum Fill {
 /// [`Document::color_balance`]'s own luma-weighted shadow/midtone/
 /// highlight blend added directly to each channel; Exposure
 /// [`Document::exposure`]'s own stop-multiply/offset/gamma chain over
-/// the pixel's own `0.0..=1.0` value.
+/// the pixel's own `0.0..=1.0` value; Photo Filter
+/// [`Document::photo_filter`]'s own per-channel lerp toward `color` by
+/// `density`.
 pub fn apply_adjustment(adjustment: Adjustment, [r, g, b]: [u8; 3]) -> [u8; 3] {
     match adjustment {
         Adjustment::Invert => [255 - r, 255 - g, 255 - b],
@@ -3992,6 +3998,11 @@ pub fn apply_adjustment(adjustment: Adjustment, [r, g, b]: [u8; 3]) -> [u8; 3] {
                 to_byte(v.clamp(0.0, 1.0))
             };
             [apply(r), apply(g), apply(b)]
+        }
+        Adjustment::PhotoFilter { color, density } => {
+            let t = density.min(100) as f32 / 100.0;
+            let blend = |c: u8, f: u8| to_byte(lerp(to_unit(c), to_unit(f), t));
+            [blend(r, color[0]), blend(g, color[1]), blend(b, color[2])]
         }
     }
 }
@@ -25944,23 +25955,17 @@ impl Document {
     /// dialog also offers a "Preserve Luminosity" checkbox that
     /// renormalizes brightness after tinting; this omits it — a
     /// deliberate scope cut, the same kind Black & White's single fixed
-    /// luma weighting already made in this project.
+    /// luma weighting already made in this project. Now a thin call onto
+    /// [`Adjustment::PhotoFilter`] through [`Self::adjust_with`] — the
+    /// same formula above, byte for byte, is also what a live Adjustment
+    /// Layer of this kind now applies (`apply_adjustment`).
     pub fn photo_filter(
         &mut self,
         id: LayerId,
         color: [u8; 3],
         density: u8,
     ) -> Result<Option<Rect>, String> {
-        let t = density.min(100) as f32 / 100.0;
-        self.adjust_layer_pixels(id, move |[r, g, b, a]| {
-            let blend = |c: u8, f: u8| to_byte(lerp(to_unit(c), to_unit(f), t));
-            [
-                blend(r, color[0]),
-                blend(g, color[1]),
-                blend(b, color[2]),
-                a,
-            ]
-        })
+        self.adjust_with(id, Adjustment::PhotoFilter { color, density })
     }
 
     /// Camera Raw Filter > Temperature/Tint: a direct per-channel shift
@@ -44716,7 +44721,12 @@ mod tests {
         // factor of exactly 2, offset and gamma both neutral) simply
         // doubles each channel's own 0..=1 value before clamping:
         // 200/255*2 clamps to 1.0 -> 255; 100/255*2 = 200/255 exactly ->
-        // 200; 50/255*2 = 100/255 exactly -> 100.
+        // 200; 50/255*2 = 100/255 exactly -> 100. Photo Filter toward
+        // white ([255,255,255]) at density 40 (t=0.4) lerps each
+        // channel's own 0..=1 value 40% of the way to 1.0:
+        // 200/255*0.6 + 0.4 = 222/255 exactly -> 222; 100/255*0.6 + 0.4
+        // = 162/255 exactly -> 162; 50/255*0.6 + 0.4 = 132/255 exactly
+        // -> 132.
         for (adjustment, expected) in [
             (
                 Adjustment::BrightnessContrast {
@@ -44750,6 +44760,13 @@ mod tests {
                     gamma: 100,
                 },
                 [255, 200, 100],
+            ),
+            (
+                Adjustment::PhotoFilter {
+                    color: [255, 255, 255],
+                    density: 40,
+                },
+                [222, 162, 132],
             ),
         ] {
             let (mut doc, base) = base_pixel();
@@ -44785,6 +44802,9 @@ mod tests {
                     offset,
                     gamma,
                 } => baked.exposure(baked_id, exposure, offset, gamma).unwrap(),
+                Adjustment::PhotoFilter { color, density } => {
+                    baked.photo_filter(baked_id, color, density).unwrap()
+                }
             };
             assert_eq!(&live[..3], expected, "{adjustment:?}");
             assert_eq!(live, composite_at(&baked, 0), "{adjustment:?}");
