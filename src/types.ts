@@ -441,6 +441,12 @@ export type Palette =
   | { kind: "exact" }
   | { kind: "uniform" }
   | { kind: "adaptive"; colors: number };
+/** Mirrors `IndexedDither` in src-tauri/src/document.rs. */
+export type IndexedDither =
+  | { kind: "none" }
+  | { kind: "diffusion" }
+  | { kind: "pattern" }
+  | { kind: "noise"; seed: number };
 export type BitmapMethod =
   | "threshold"
   | "patternDither"

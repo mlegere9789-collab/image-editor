@@ -26321,6 +26321,65 @@ Tests: 1991 Rust (1990 → 1991, 1984 lib + 7 pipeline — one new
 `#[test]`), 51 frontend (unchanged — the new dropdown option and
 sliders are plain UI, no new frontend-testable logic).
 
+## Phase 458 — Indexed Color Mode gains real Dither
+
+Indexed Color Mode always snapped every pixel straight to its nearest
+table entry, with no dithering at all. Researched Photoshop's actual
+real Dither options first (confirmed directly against Adobe's own
+"Conversion options for indexed-color images" documentation) and found
+four real, named methods: None, Diffusion, Pattern, and Noise. This
+project already had the exact algorithms two of them need — Floyd–
+Steinberg error diffusion and a 4×4 Bayer ordered-dither matrix — built
+for Bitmap Mode's own `BitmapMethod::DiffusionDither`/`PatternDither`,
+so this phase generalizes both from a single binary luma channel to
+three independent RGB channels feeding a real multi-color nearest-
+palette lookup, rather than reinventing either from scratch.
+
+A new `IndexedDither` enum (`None`, `Diffusion`, `Pattern`, `Noise {
+seed }`) is `convert_to_indexed`'s second parameter. `None` (and
+`Uniform`, where Photoshop's own dialog greys Dither out entirely)
+keeps the exact previous byte-for-byte behaviour, untouched. `Pattern`
+biases each pixel by `(BAYER[y%4][x%4]/15 - 0.5) * 100` before the
+nearest-table lookup — the same matrix Bitmap Mode's own Pattern Dither
+already uses, now a real per-pixel threshold bias instead of a binary
+on/off. `Noise` draws a seeded `XorShift32` value per pixel (the same
+per-pixel draw `note_paper`/`reticulation`/Diffuse Glow's own Graininess
+already use) as a randomized bias, matching Adobe's own description of
+Noise as randomized and seam-avoiding where Pattern's own grid can
+create visible repeating structure. `Diffusion` maintains three
+`i32` error buffers (one per channel) and propagates each pixel's own
+quantization error with the identical `7/16, 3/16, 5/16, 1/16` kernel
+Bitmap Mode's Diffusion Dither already uses, generalized to whichever
+table entry is nearest rather than a binary black/white choice.
+
+**Verified two ways.** All three new tests share a common trap:
+Photoshop's own dithering only matters when a pixel's true value sits
+exactly between two kept palette entries, so each fixture places a
+probe value precisely at the midpoint of a real 2-entry Adaptive table
+(50 and 200, midpoint 125) — a case where *no* dithering always ties
+and resolves to the same entry via `nearest_table_color`'s own first-
+entry-wins rule. `indexed_dither_pattern_biases_by_the_bayer_matrix_position`
+places two identical-valued probes at different grid positions
+(`BAYER[0][0] = 0` and `BAYER[3][0] = 15`) and shows one stays put
+while the other flips to the second table entry, purely from position.
+`indexed_dither_noise_biases_by_a_seeded_random_draw` reuses the same
+fixture with seed 1, independently cross-checked via a Python script
+replicating `XorShift32` exactly (including its own f32 rounding): the
+13th scan-order draw (`0.41187429...`) flips the second probe the same
+way, through a genuinely different, position-independent mechanism.
+`indexed_dither_diffusion_propagates_quantization_error_rightward` uses
+an 8×1 row where the very first pixel (no error propagated in yet)
+ties and resolves to 50, leaving a real 75-value quantization error
+whose rightward `7/16` share (`75*7/16 = 32`, integer division) pushes
+the second, identically-valued pixel to 157 — no longer a tie, and it
+flips to 200. `cargo fmt --check`, `cargo clippy --all-targets -- -D
+warnings`, `cargo test` (full suite), `npx tsc --noEmit`, and `npm run
+build` all clean.
+
+Tests: 1994 Rust (1991 → 1994, 1987 lib + 7 pipeline — three new
+`#[test]`s, one per dither method), 51 frontend (unchanged — the new
+Dither dropdown is plain UI, no new frontend-testable logic).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

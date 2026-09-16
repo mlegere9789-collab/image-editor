@@ -3753,6 +3753,32 @@ pub enum Palette {
     Adaptive { colors: u16 },
 }
 
+/// Image > Mode > Indexed Color's Dither, Photoshop's own real four
+/// methods (confirmed directly against Adobe's own "Conversion options
+/// for indexed-color images" documentation): `None` snaps every pixel
+/// straight to its nearest table entry — this project's own previous,
+/// only behaviour. `Diffusion` is Floyd–Steinberg error diffusion,
+/// reusing the exact same kernel [`Document::convert_mode`]'s own
+/// `BitmapMethod::DiffusionDither` already applies (`7/16`, `3/16`,
+/// `5/16`, `1/16`), generalised from a single luma channel to all three
+/// RGB channels independently. `Pattern` is the same 4×4 Bayer ordered-
+/// dither matrix `BitmapMethod::PatternDither` already uses, standing in
+/// for a real per-pixel threshold bias before the nearest-entry lookup
+/// rather than Bitmap's own binary on/off. `Noise` draws a seeded
+/// [`XorShift32`] value per pixel (the same per-pixel draw `note_paper`
+/// and `reticulation` already use) as a randomized bias instead of a
+/// repeating grid, matching Adobe's own description of Noise as
+/// "randomized" and "seam-avoiding" where Pattern's own grid can create
+/// visible repeating structure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum IndexedDither {
+    None,
+    Diffusion,
+    Pattern,
+    Noise { seed: u32 },
+}
+
 /// Image > Mode > Bitmap's Method: 50% Threshold, Pattern Dither (a 4×4
 /// Bayer matrix), Diffusion Dither (Floyd–Steinberg), or one of Photoshop's
 /// own six real Halftone Screen dot shapes (Square, Diamond, Round, Line,
@@ -6410,17 +6436,24 @@ impl Document {
 
     /// Image > Mode > Indexed Color: builds the colour table by `palette`
     /// from every layer's non-transparent pixels, snaps every pixel to its
-    /// nearest entry, and sets the mode. Exact takes the distinct colours
-    /// in first-seen order and refuses more than 256; Uniform is the
-    /// 6×6×6 cube `0, 51, … 255` in red-major order, each channel snapped
-    /// to its nearest level; Adaptive counts colours, keeps the `colors`
-    /// most frequent (ties broken by the lower colour), and snaps the rest
-    /// to the nearest kept entry by squared RGB distance, the first on a
-    /// tie. Alpha is untouched; transparent pixels contribute nothing to
-    /// the table but are snapped like any other. Dithering, Local and
-    /// Master palettes, Forced colours, Transparency, and Matte are
-    /// documented scope cuts.
-    pub fn convert_to_indexed(&mut self, palette: Palette) -> Result<(), String> {
+    /// nearest entry (optionally dithered first, see [`IndexedDither`]),
+    /// and sets the mode. Exact takes the distinct colours in first-seen
+    /// order and refuses more than 256; Uniform is the 6×6×6 cube `0,
+    /// 51, … 255` in red-major order, each channel snapped to its
+    /// nearest level (`dither` is ignored for Uniform, matching
+    /// Photoshop's own dialog, which greys Dither out for Web/Uniform-
+    /// style exact-cube palettes); Adaptive counts colours, keeps the
+    /// `colors` most frequent (ties broken by the lower colour), and
+    /// snaps the rest to the nearest kept entry by squared RGB distance,
+    /// the first on a tie. Alpha is untouched; transparent pixels
+    /// contribute nothing to the table but are snapped like any other.
+    /// Local and Master palettes, Forced colours, Transparency, and
+    /// Matte are documented scope cuts.
+    pub fn convert_to_indexed(
+        &mut self,
+        palette: Palette,
+        dither: IndexedDither,
+    ) -> Result<(), String> {
         let table: Vec<[u8; 3]> = match palette {
             Palette::Uniform => {
                 let mut cube = Vec::with_capacity(216);
@@ -6478,16 +6511,96 @@ impl Document {
             }
         };
         self.color_table = table;
+        let doc_width = self.width as usize;
+        let doc_height = self.height as usize;
         for index in 0..self.layers.len() {
             let mut pixels = std::mem::take(&mut self.layers[index].pixels);
-            for px in pixels.chunks_exact_mut(CHANNELS) {
-                let snapped = if palette == Palette::Uniform {
-                    let level = |v: u8| ((v as f32 / 51.0).round() as u8) * 51;
-                    [level(px[0]), level(px[1]), level(px[2])]
-                } else {
-                    self.nearest_table_color([px[0], px[1], px[2]])
-                };
-                px[..3].copy_from_slice(&snapped);
+            if palette == Palette::Uniform || dither == IndexedDither::None {
+                for px in pixels.chunks_exact_mut(CHANNELS) {
+                    let snapped = if palette == Palette::Uniform {
+                        let level = |v: u8| ((v as f32 / 51.0).round() as u8) * 51;
+                        [level(px[0]), level(px[1]), level(px[2])]
+                    } else {
+                        self.nearest_table_color([px[0], px[1], px[2]])
+                    };
+                    px[..3].copy_from_slice(&snapped);
+                }
+            } else {
+                match dither {
+                    IndexedDither::Pattern => {
+                        for (i, px) in pixels.chunks_exact_mut(CHANNELS).enumerate() {
+                            let (x, y) = (i % doc_width, i / doc_width);
+                            let bias = (BAYER[y % 4][x % 4] as f32 / 15.0 - 0.5) * 100.0;
+                            let biased = [
+                                (px[0] as f32 + bias).round().clamp(0.0, 255.0) as u8,
+                                (px[1] as f32 + bias).round().clamp(0.0, 255.0) as u8,
+                                (px[2] as f32 + bias).round().clamp(0.0, 255.0) as u8,
+                            ];
+                            px[..3].copy_from_slice(&self.nearest_table_color(biased));
+                        }
+                    }
+                    IndexedDither::Noise { seed } => {
+                        let mut rng = XorShift32::new(seed);
+                        for px in pixels.chunks_exact_mut(CHANNELS) {
+                            let bias = rng.next_unit() * 100.0;
+                            let biased = [
+                                (px[0] as f32 + bias).round().clamp(0.0, 255.0) as u8,
+                                (px[1] as f32 + bias).round().clamp(0.0, 255.0) as u8,
+                                (px[2] as f32 + bias).round().clamp(0.0, 255.0) as u8,
+                            ];
+                            px[..3].copy_from_slice(&self.nearest_table_color(biased));
+                        }
+                    }
+                    IndexedDither::Diffusion => {
+                        let mut r: Vec<i32> = pixels
+                            .chunks_exact(CHANNELS)
+                            .map(|px| i32::from(px[0]))
+                            .collect();
+                        let mut g: Vec<i32> = pixels
+                            .chunks_exact(CHANNELS)
+                            .map(|px| i32::from(px[1]))
+                            .collect();
+                        let mut b: Vec<i32> = pixels
+                            .chunks_exact(CHANNELS)
+                            .map(|px| i32::from(px[2]))
+                            .collect();
+                        for y in 0..doc_height {
+                            for x in 0..doc_width {
+                                let i = y * doc_width + x;
+                                let old = [
+                                    r[i].clamp(0, 255) as u8,
+                                    g[i].clamp(0, 255) as u8,
+                                    b[i].clamp(0, 255) as u8,
+                                ];
+                                let snapped = self.nearest_table_color(old);
+                                let base = i * CHANNELS;
+                                pixels[base..base + 3].copy_from_slice(&snapped);
+                                let errors = [
+                                    r[i] - i32::from(snapped[0]),
+                                    g[i] - i32::from(snapped[1]),
+                                    b[i] - i32::from(snapped[2]),
+                                ];
+                                for (channel, &error) in
+                                    [&mut r, &mut g, &mut b].into_iter().zip(&errors)
+                                {
+                                    if x + 1 < doc_width {
+                                        channel[i + 1] += error * 7 / 16;
+                                    }
+                                    if y + 1 < doc_height {
+                                        if x > 0 {
+                                            channel[i + doc_width - 1] += error * 3 / 16;
+                                        }
+                                        channel[i + doc_width] += error * 5 / 16;
+                                        if x + 1 < doc_width {
+                                            channel[i + doc_width + 1] += error / 16;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    IndexedDither::None => unreachable!(),
+                }
             }
             self.layers[index].pixels = pixels;
         }
@@ -6763,9 +6876,9 @@ impl Document {
                 }]);
             }
             ColorMode::Indexed => {
-                return match self.convert_to_indexed(Palette::Exact) {
+                return match self.convert_to_indexed(Palette::Exact, IndexedDither::None) {
                     Ok(()) => Ok(()),
-                    Err(_) => self.convert_to_indexed(Palette::Uniform),
+                    Err(_) => self.convert_to_indexed(Palette::Uniform, IndexedDither::None),
                 };
             }
             ColorMode::Grayscale => {
@@ -61505,7 +61618,8 @@ mod tests {
         let id = doc
             .add_layer("l", &[10, 60, 130, 255, 25, 26, 255, 128], 2, 1)
             .unwrap();
-        doc.convert_to_indexed(Palette::Uniform).unwrap();
+        doc.convert_to_indexed(Palette::Uniform, IndexedDither::None)
+            .unwrap();
         assert_eq!(doc.view().mode, ColorMode::Indexed);
         assert_eq!(pixel(&doc, id, 0, 0), [0, 51, 153, 255]);
         assert_eq!(pixel(&doc, id, 1, 0), [0, 51, 255, 128]);
@@ -61523,7 +61637,8 @@ mod tests {
         let id = doc
             .add_layer("l", &[9, 8, 7, 255, 1, 2, 3, 255, 9, 8, 7, 0], 3, 1)
             .unwrap();
-        doc.convert_to_indexed(Palette::Exact).unwrap();
+        doc.convert_to_indexed(Palette::Exact, IndexedDither::None)
+            .unwrap();
         // Unique colours in first-seen order, transparent pixels ignored.
         assert_eq!(doc.color_table(), &[[9, 8, 7], [1, 2, 3]]);
         assert_eq!(pixel(&doc, id, 0, 0), [9, 8, 7, 255]);
@@ -61535,11 +61650,14 @@ mod tests {
             pixels.extend_from_slice(&[v, v, v, 255]);
         }
         doc.add_layer("greys", &pixels, 16, 16).unwrap();
-        doc.convert_to_indexed(Palette::Exact).unwrap();
+        doc.convert_to_indexed(Palette::Exact, IndexedDither::None)
+            .unwrap();
         assert_eq!(doc.color_table().len(), 256);
         doc.convert_mode(ColorMode::Rgb, None).unwrap();
         doc.add_layer("extra", &[255, 0, 0, 255], 1, 1).unwrap();
-        assert!(doc.convert_to_indexed(Palette::Exact).is_err());
+        assert!(doc
+            .convert_to_indexed(Palette::Exact, IndexedDither::None)
+            .is_err());
         assert_eq!(doc.view().mode, ColorMode::Rgb);
         // `convert_mode(Indexed)` picks Exact when it fits, else Uniform.
         doc.convert_mode(ColorMode::Indexed, None).unwrap();
@@ -61559,7 +61677,7 @@ mod tests {
             255, 0, 0, 255,  0, 255, 0, 255,  0, 0, 255, 255,  250, 0, 0, 255,
         ];
         let id = doc.add_layer("l", &pixels, 8, 1).unwrap();
-        doc.convert_to_indexed(Palette::Adaptive { colors: 2 })
+        doc.convert_to_indexed(Palette::Adaptive { colors: 2 }, IndexedDither::None)
             .unwrap();
         assert_eq!(doc.color_table(), &[[255, 0, 0], [0, 0, 255]]);
         assert_eq!(pixel(&doc, id, 7, 0), [255, 0, 0, 255]);
@@ -61568,18 +61686,114 @@ mod tests {
         // Three colours keep them all and change nothing but near-red.
         let mut doc = Document::new(8, 1).unwrap();
         let id = doc.add_layer("l", &pixels, 8, 1).unwrap();
-        doc.convert_to_indexed(Palette::Adaptive { colors: 3 })
+        doc.convert_to_indexed(Palette::Adaptive { colors: 3 }, IndexedDither::None)
             .unwrap();
         assert_eq!(doc.color_table(), &[[255, 0, 0], [0, 0, 255], [0, 255, 0]]);
         assert_eq!(pixel(&doc, id, 1, 0), [0, 255, 0, 255]);
         assert_eq!(pixel(&doc, id, 7, 0), [255, 0, 0, 255]);
     }
 
+    fn indexed_dither_fixture() -> (Document, LayerId) {
+        // 4x4, grayscale. Adaptive{colors: 2} keeps the two most frequent
+        // values, 50 (7 pixels) and 200 (7 pixels), dropping 125 (2
+        // pixels, at (0, 0) and (0, 3)) from the table entirely -- 125 is
+        // exactly the midpoint between 50 and 200, so with no dithering
+        // both of those probe pixels tie (75 away from each) and
+        // nearest_table_color's own first-entry-wins rule always snaps
+        // them to 50. Each dither method below is checked against these
+        // same two probes, since only a real per-pixel bias can make one
+        // of them land on 200 instead.
+        #[rustfmt::skip]
+        let values = [
+            125,  50,  50,  50,
+             50,  50,  50,  50,
+            200, 200, 200, 200,
+            125, 200, 200, 200,
+        ];
+        let mut pixels = Vec::with_capacity(64);
+        for v in values {
+            pixels.extend_from_slice(&[v, v, v, 255]);
+        }
+        let mut doc = Document::new(4, 4).unwrap();
+        let id = doc.add_layer("l", &pixels, 4, 4).unwrap();
+        (doc, id)
+    }
+
+    #[test]
+    fn indexed_dither_pattern_biases_by_the_bayer_matrix_position() {
+        // bias = (BAYER[y%4][x%4]/15 - 0.5) * 100. Probe (0, 0):
+        // BAYER[0][0] = 0, bias = -50, biased = 125-50 = 75 -- closer to
+        // 50 (25 away) than 200 (125 away), so it stays 50, the same
+        // result no dithering gives. Probe (0, 3): BAYER[3][0] = 15,
+        // bias = +50, biased = 125+50 = 175 -- closer to 200 (25 away)
+        // than 50 (125 away), flipping it to 200 -- a real, hand-verified
+        // change driven purely by the two probes' own different grid
+        // positions, not their (identical) original value.
+        let (mut doc, id) = indexed_dither_fixture();
+        doc.convert_to_indexed(Palette::Adaptive { colors: 2 }, IndexedDither::Pattern)
+            .unwrap();
+        assert_eq!(doc.color_table(), &[[50, 50, 50], [200, 200, 200]]);
+        assert_eq!(pixel(&doc, id, 0, 0), [50, 50, 50, 255]);
+        assert_eq!(pixel(&doc, id, 0, 3), [200, 200, 200, 255]);
+    }
+
+    #[test]
+    fn indexed_dither_noise_biases_by_a_seeded_random_draw() {
+        // Seed 1's own scan-order draws (independently confirmed via a
+        // Python script replicating XorShift32 exactly, including its
+        // f32 rounding): draw 1 (pixel index 0, probe (0, 0)) is
+        // -0.99987411..., bias = -99.9874..., biased = 125-99.9874... =
+        // 25.0126... -> rounds to 25 -- closer to 50 (25 away) than 200
+        // (175 away), stays 50. Draw 13 (pixel index 12, probe (0, 3),
+        // row-major scan order) is 0.41187429..., bias = 41.1874...,
+        // biased = 125+41.1874... = 166.1874... -> rounds to 166 --
+        // closer to 200 (34 away) than 50 (116 away), flipping to 200 --
+        // the same real flip Pattern's own test finds, but through a
+        // genuinely different, position-independent mechanism.
+        let (mut doc, id) = indexed_dither_fixture();
+        doc.convert_to_indexed(
+            Palette::Adaptive { colors: 2 },
+            IndexedDither::Noise { seed: 1 },
+        )
+        .unwrap();
+        assert_eq!(doc.color_table(), &[[50, 50, 50], [200, 200, 200]]);
+        assert_eq!(pixel(&doc, id, 0, 0), [50, 50, 50, 255]);
+        assert_eq!(pixel(&doc, id, 0, 3), [200, 200, 200, 255]);
+    }
+
+    #[test]
+    fn indexed_dither_diffusion_propagates_quantization_error_rightward() {
+        // An 8x1 row: [125, 125, 50, 50, 50, 200, 200, 200]. Adaptive
+        // counts 50 x3 and 200 x3 (both beating 125's own count of 2),
+        // so the table is [50, 200], with 125 again exactly the midpoint
+        // of both. Pixel 0 (the row's first, so no error has propagated
+        // into it yet) ties at 75 away from each entry and
+        // nearest_table_color's first-entry-wins rule snaps it to 50,
+        // leaving a real per-channel quantization error of 125-50 = 75.
+        // That error's own rightward share, 75*7/16 = 32 (integer
+        // division, truncating), adds onto pixel 1's own original value:
+        // 125+32 = 157 -- no longer a tie, and closer to 200 (43 away)
+        // than 50 (107 away), so pixel 1 flips to 200 even though its
+        // own original value was identical to pixel 0's.
+        let pixels: Vec<u8> = [125u8, 125, 50, 50, 50, 200, 200, 200]
+            .iter()
+            .flat_map(|&v| [v, v, v, 255])
+            .collect();
+        let mut doc = Document::new(8, 1).unwrap();
+        let id = doc.add_layer("l", &pixels, 8, 1).unwrap();
+        doc.convert_to_indexed(Palette::Adaptive { colors: 2 }, IndexedDither::Diffusion)
+            .unwrap();
+        assert_eq!(doc.color_table(), &[[50, 50, 50], [200, 200, 200]]);
+        assert_eq!(pixel(&doc, id, 0, 0), [50, 50, 50, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [200, 200, 200, 255]);
+    }
+
     #[test]
     fn indexed_mode_constrains_paint_to_the_table() {
         let mut doc = Document::new(2, 1).unwrap();
         let id = doc.add_layer("l", &[0; 8], 2, 1).unwrap();
-        doc.convert_to_indexed(Palette::Uniform).unwrap();
+        doc.convert_to_indexed(Palette::Uniform, IndexedDither::None)
+            .unwrap();
         doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
         doc.fill_selection(id, [10, 60, 130, 255]).unwrap();
         assert_eq!(pixel(&doc, id, 0, 0), [0, 51, 153, 255]);
@@ -61588,7 +61802,8 @@ mod tests {
         let id = doc
             .add_layer("l", &[255, 0, 0, 255, 0, 255, 0, 255], 2, 1)
             .unwrap();
-        doc.convert_to_indexed(Palette::Exact).unwrap();
+        doc.convert_to_indexed(Palette::Exact, IndexedDither::None)
+            .unwrap();
         doc.stroke(
             id,
             &[(0.5, 0.5)],
@@ -61606,14 +61821,14 @@ mod tests {
         let mut doc = Document::new(1, 1).unwrap();
         let id = doc.add_layer("l", &[7, 7, 7, 255], 1, 1).unwrap();
         assert!(doc
-            .convert_to_indexed(Palette::Adaptive { colors: 1 })
+            .convert_to_indexed(Palette::Adaptive { colors: 1 }, IndexedDither::None)
             .is_err());
         assert!(doc
-            .convert_to_indexed(Palette::Adaptive { colors: 257 })
+            .convert_to_indexed(Palette::Adaptive { colors: 257 }, IndexedDither::None)
             .is_err());
         assert_eq!(doc.view().mode, ColorMode::Rgb);
         assert!(doc.color_table().is_empty());
-        doc.convert_to_indexed(Palette::Adaptive { colors: 2 })
+        doc.convert_to_indexed(Palette::Adaptive { colors: 2 }, IndexedDither::None)
             .unwrap();
         assert_eq!(doc.color_table(), &[[7, 7, 7]]);
         doc.convert_mode(ColorMode::Grayscale, None).unwrap();

@@ -659,7 +659,8 @@ mod tests {
     #[test]
     fn version_three_keeps_channels_spots_the_brush_tip_presets_comps_and_palettes() {
         use crate::document::{
-            AlphaChannel, BrushTip, Ink, LayerComp, LayerCompState, Palette, SpotChannel,
+            AlphaChannel, BrushTip, IndexedDither, Ink, LayerComp, LayerCompState, Palette,
+            SpotChannel,
         };
         let (w, h) = (6u32, 4u32);
         let mut document = Document::new(w, h).unwrap();
@@ -699,7 +700,7 @@ mod tests {
         document.set_opacity(top, 0.25).unwrap();
         document.save_layer_comp("photo only").unwrap();
         document
-            .convert_to_indexed(Palette::Adaptive { colors: 4 })
+            .convert_to_indexed(Palette::Adaptive { colors: 4 }, IndexedDither::None)
             .unwrap();
         let tip = document.brush_tip().unwrap().clone();
         assert!(tip.values.iter().any(|&v| v > 0.0 && v < 1.0));

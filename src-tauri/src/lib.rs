@@ -2351,14 +2351,15 @@ fn convert_to_profile_dithered(
     })
 }
 
-/// Image > Mode > Indexed Color with the dialog's `palette`.
+/// Image > Mode > Indexed Color with the dialog's `palette` and `dither`.
 #[tauri::command]
 fn convert_to_indexed(
     state: State<'_, AppState>,
     palette: document::Palette,
+    dither: document::IndexedDither,
 ) -> Result<Snapshot, String> {
     edit_checkpointed(&state, |document| {
-        document.convert_to_indexed(palette)?;
+        document.convert_to_indexed(palette, dither)?;
         Ok(Some(Rect {
             x0: 0,
             y0: 0,

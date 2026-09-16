@@ -95,6 +95,7 @@ import type {
   HdrHistogram,
   HdrSourceSummary,
   HistoryState,
+  IndexedDither,
   Ink,
   LevelsChannel,
   LiquifyTool,
@@ -1378,6 +1379,8 @@ export default function App() {
   const [indexedPalette, setIndexedPalette] =
     useState<Palette["kind"]>("adaptive");
   const [indexedColors, setIndexedColors] = useState(256);
+  const [indexedDither, setIndexedDither] =
+    useState<IndexedDither["kind"]>("none");
   // Image > Mode > Duotone: one to four ink colours, each with its own
   // darkness-to-coverage curve at the same five fixed input positions
   // (0, 64, 128, 192, 255) the plain Curves command uses; a straight
@@ -21129,6 +21132,24 @@ export default function App() {
                 />
               </label>
             )}
+            {indexedPalette !== "uniform" && (
+              <label className="control control--row">
+                <span className="control__label">Dither</span>
+                <select
+                  value={indexedDither}
+                  onChange={(event) =>
+                    setIndexedDither(
+                      event.target.value as IndexedDither["kind"],
+                    )
+                  }
+                >
+                  <option value="none">None</option>
+                  <option value="diffusion">Diffusion</option>
+                  <option value="pattern">Pattern</option>
+                  <option value="noise">Noise</option>
+                </select>
+              </label>
+            )}
             <div className="modal__actions">
               <button
                 className="button button--quiet"
@@ -21143,7 +21164,19 @@ export default function App() {
                     indexedPalette === "adaptive"
                       ? { kind: "adaptive", colors: indexedColors }
                       : { kind: indexedPalette };
-                  void runCommand("convert_to_indexed", { palette });
+                  const dither: IndexedDither =
+                    indexedPalette === "uniform"
+                      ? { kind: "none" }
+                      : indexedDither === "noise"
+                        ? {
+                            kind: "noise",
+                            seed:
+                              (Date.now() ^
+                                Math.floor(Math.random() * 0xffffffff)) >>>
+                              0,
+                          }
+                        : { kind: indexedDither };
+                  void runCommand("convert_to_indexed", { palette, dither });
                   setShowIndexedDialog(false);
                 }}
                 disabled={busy}
