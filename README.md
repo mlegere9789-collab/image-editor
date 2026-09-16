@@ -25355,6 +25355,44 @@ refactored delegation. `cargo fmt`/`clippy --all-targets -D warnings`/
 Tests: 1972 Rust (a case added to an existing test, not a new `#[test]`,
 so the count doesn't move), 46 frontend (unchanged).
 
+## Phase 436 — Adjustment Layer's Exposure
+
+A second kind off Adjustment Layer's own documented scope cut, same
+template as Phase 435's Color Balance: Exposure is also a pure
+per-pixel function with no external state, so it slots into
+`Adjustment`/`apply_adjustment` the same way.
+
+`document.rs`'s `Adjustment` enum gains an `Exposure { exposure: i32,
+offset: i32, gamma: i32 }` variant; `apply_adjustment` gains a match arm
+carrying `exposure`'s own exact three-control chain — `2^exposure`
+multiplies the pixel's `0.0..=1.0` value, `offset` shifts it, `gamma`
+curves it via `value.powf(100.0/gamma)`, floored at zero before the
+power and clamped only at the very end. The destructive `exposure`
+command is now a thin call onto `Adjustment::Exposure` through
+`adjust_with`, the same refactor `color_balance` went through last
+phase, so live and destructive share one formula outright. No `lib.rs`
+change: `add_adjustment_layer`/`set_adjustment` already forward the
+whole enum.
+
+The frontend's `Adjustment` type gained the matching `exposure` variant;
+the Adjustment Layer dialog gained an Exposure option showing the exact
+same Exposure/Offset/Gamma sliders the standalone Exposure dialog
+already has, reusing that dialog's own `exposureStops`/`exposureOffset`/
+`exposureGamma` state rather than duplicating it.
+
+Extended `adjustment_layers_match_their_destructive_commands` (its
+`match` over `Adjustment` compiler-enforced exhaustive again) with a
+sixth case: +1.00 stop of Exposure (offset and gamma both left neutral,
+a factor of exactly 2) on the suite's own base pixel (200, 100, 50) —
+`200/255 * 2` clamps to `1.0` → 255; `100/255 * 2 = 200/255` exactly →
+200; `50/255 * 2 = 100/255` exactly → 100. All 12 of `exposure`'s own
+pre-existing tests pass unmodified against the refactored delegation.
+`cargo fmt`/`clippy --all-targets -D warnings`/`test` and `npx tsc
+--noEmit`/`npm run build`/`npm test` all clean.
+
+Tests: 1972 Rust (another case added to the same existing test, count
+unchanged), 46 frontend (unchanged).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

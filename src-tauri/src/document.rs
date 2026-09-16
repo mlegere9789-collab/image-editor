@@ -802,6 +802,11 @@ pub enum Adjustment {
         midtones: [i32; 3],
         highlights: [i32; 3],
     },
+    Exposure {
+        exposure: i32,
+        offset: i32,
+        gamma: i32,
+    },
 }
 
 impl Adjustment {
@@ -3912,7 +3917,9 @@ pub enum Fill {
 /// Hue/Saturation [`rgb_to_hsl`]'s own H/S/L shifted by `hue`/`saturation`/
 /// `lightness` and converted back with [`hsl_to_rgb`]; Color Balance
 /// [`Document::color_balance`]'s own luma-weighted shadow/midtone/
-/// highlight blend added directly to each channel.
+/// highlight blend added directly to each channel; Exposure
+/// [`Document::exposure`]'s own stop-multiply/offset/gamma chain over
+/// the pixel's own `0.0..=1.0` value.
 pub fn apply_adjustment(adjustment: Adjustment, [r, g, b]: [u8; 3]) -> [u8; 3] {
     match adjustment {
         Adjustment::Invert => [255 - r, 255 - g, 255 - b],
@@ -3971,6 +3978,20 @@ pub fn apply_adjustment(adjustment: Adjustment, [r, g, b]: [u8; 3]) -> [u8; 3] {
                 (v as f32 + shift).round().clamp(0.0, 255.0) as u8
             };
             [apply(r, 0), apply(g, 1), apply(b, 2)]
+        }
+        Adjustment::Exposure {
+            exposure,
+            offset,
+            gamma,
+        } => {
+            let factor = 2f32.powf(exposure.clamp(-2000, 2000) as f32 / 100.0);
+            let offset = offset.clamp(-50, 50) as f32 / 100.0;
+            let exponent = 100.0 / gamma.clamp(1, 999) as f32;
+            let apply = |c: u8| {
+                let v = (to_unit(c) * factor + offset).max(0.0).powf(exponent);
+                to_byte(v.clamp(0.0, 1.0))
+            };
+            [apply(r), apply(g), apply(b)]
         }
     }
 }
@@ -25989,7 +26010,10 @@ impl Document {
     /// a fractional exponent is undefined) and clamped to `0.0..=1.0`
     /// only at the very end, so a highlight exposure pushes past white
     /// exactly the way it would on a real sensor before finally clipping.
-    /// Alpha untouched.
+    /// Alpha untouched. Now a thin call onto [`Adjustment::Exposure`]
+    /// through [`Self::adjust_with`] — the same formula above, byte for
+    /// byte, is also what a live Adjustment Layer of this kind now
+    /// applies (`apply_adjustment`).
     pub fn exposure(
         &mut self,
         id: LayerId,
@@ -25997,16 +26021,14 @@ impl Document {
         offset: i32,
         gamma: i32,
     ) -> Result<Option<Rect>, String> {
-        let factor = 2f32.powf(exposure.clamp(-2000, 2000) as f32 / 100.0);
-        let offset = offset.clamp(-50, 50) as f32 / 100.0;
-        let exponent = 100.0 / gamma.clamp(1, 999) as f32;
-        self.adjust_layer_pixels(id, move |[r, g, b, a]| {
-            let apply = |c: u8| {
-                let v = (to_unit(c) * factor + offset).max(0.0).powf(exponent);
-                to_byte(v.clamp(0.0, 1.0))
-            };
-            [apply(r), apply(g), apply(b), a]
-        })
+        self.adjust_with(
+            id,
+            Adjustment::Exposure {
+                exposure,
+                offset,
+                gamma,
+            },
+        )
     }
 
     /// Image > Adjustments > Gradient Map: replaces each pixel's colour
@@ -44690,7 +44712,11 @@ mod tests {
         // highlight_weight 0 (124.2 - 128 is negative, clamped); Color
         // Balance shadows [100, -100, 100] (midtones/highlights both
         // zero) shifts each channel by shadow_weight * ±100 =
-        // ±2.2047244..., landing at 202/98/52.
+        // ±2.2047244..., landing at 202/98/52. Exposure +1.00 stop (a
+        // factor of exactly 2, offset and gamma both neutral) simply
+        // doubles each channel's own 0..=1 value before clamping:
+        // 200/255*2 clamps to 1.0 -> 255; 100/255*2 = 200/255 exactly ->
+        // 200; 50/255*2 = 100/255 exactly -> 100.
         for (adjustment, expected) in [
             (
                 Adjustment::BrightnessContrast {
@@ -44716,6 +44742,14 @@ mod tests {
                     highlights: [0, 0, 0],
                 },
                 [202, 98, 52],
+            ),
+            (
+                Adjustment::Exposure {
+                    exposure: 100,
+                    offset: 0,
+                    gamma: 100,
+                },
+                [255, 200, 100],
             ),
         ] {
             let (mut doc, base) = base_pixel();
@@ -44746,6 +44780,11 @@ mod tests {
                 } => baked
                     .color_balance(baked_id, shadows, midtones, highlights)
                     .unwrap(),
+                Adjustment::Exposure {
+                    exposure,
+                    offset,
+                    gamma,
+                } => baked.exposure(baked_id, exposure, offset, gamma).unwrap(),
             };
             assert_eq!(&live[..3], expected, "{adjustment:?}");
             assert_eq!(live, composite_at(&baked, 0), "{adjustment:?}");

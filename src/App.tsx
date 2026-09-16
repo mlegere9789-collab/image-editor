@@ -641,6 +641,8 @@ function adjustmentKindLabel(kind: Adjustment["kind"]): string {
       return "Hue/Saturation";
     case "colorBalance":
       return "Color Balance";
+    case "exposure":
+      return "Exposure";
     default:
       return "Invert";
   }
@@ -6744,6 +6746,13 @@ export default function App() {
           midtones: colorBalanceMidtones as [number, number, number],
           highlights: colorBalanceHighlights as [number, number, number],
         };
+      case "exposure":
+        return {
+          kind: "exposure",
+          exposure: exposureStops,
+          offset: exposureOffset,
+          gamma: exposureGamma,
+        };
       default:
         return { kind: "invert" };
     }
@@ -6759,6 +6768,9 @@ export default function App() {
     colorBalanceShadows,
     colorBalanceMidtones,
     colorBalanceHighlights,
+    exposureStops,
+    exposureOffset,
+    exposureGamma,
   ]);
 
   const addAdjustmentLayer = useCallback(async () => {
@@ -27733,8 +27745,64 @@ export default function App() {
                 <option value="posterize">Posterize</option>
                 <option value="hueSaturation">Hue/Saturation</option>
                 <option value="colorBalance">Color Balance</option>
+                <option value="exposure">Exposure</option>
               </select>
             </label>
+            {adjustmentKind === "exposure" && (
+              <>
+                <label className="control">
+                  <span className="control__label">
+                    Exposure
+                    <span className="control__value">
+                      {(exposureStops / 100).toFixed(2)}
+                    </span>
+                  </span>
+                  <input
+                    type="range"
+                    min={-200}
+                    max={200}
+                    value={exposureStops}
+                    onChange={(event) =>
+                      setExposureStops(Number(event.target.value))
+                    }
+                  />
+                </label>
+                <label className="control">
+                  <span className="control__label">
+                    Offset
+                    <span className="control__value">
+                      {(exposureOffset / 100).toFixed(2)}
+                    </span>
+                  </span>
+                  <input
+                    type="range"
+                    min={-50}
+                    max={50}
+                    value={exposureOffset}
+                    onChange={(event) =>
+                      setExposureOffset(Number(event.target.value))
+                    }
+                  />
+                </label>
+                <label className="control">
+                  <span className="control__label">
+                    Gamma
+                    <span className="control__value">
+                      {(exposureGamma / 100).toFixed(2)}
+                    </span>
+                  </span>
+                  <input
+                    type="range"
+                    min={10}
+                    max={300}
+                    value={exposureGamma}
+                    onChange={(event) =>
+                      setExposureGamma(Number(event.target.value))
+                    }
+                  />
+                </label>
+              </>
+            )}
             {adjustmentKind === "colorBalance" && (
               <table className="channel-mixer">
                 <thead>
