@@ -251,7 +251,8 @@ export type Adjustment =
       gamma: number;
       outputBlack: number;
       outputWhite: number;
-    };
+    }
+  | { kind: "curves"; points: [number, number, number, number, number] };
 
 /** Mirrors `NeuralFilterKind` in src-tauri/src/document.rs (serde
  * camelCase, fieldless variants so each serializes as a bare string) — a

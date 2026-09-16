@@ -25672,6 +25672,55 @@ build`/`npm test` all clean.
 Tests: 1972 Rust (a ninth case added to the same existing test, count
 unchanged), 46 frontend (unchanged).
 
+## Phase 444 — Adjustment Layer's Curves
+
+A tenth kind off Adjustment Layer's own documented scope cut — the
+plain, five-fixed-point form of Curves (`Document::curves`), a pure
+per-pixel lookup table with no external state, the same scope this
+project's own `curves` command has always had (Curves' richer
+per-channel/freehand modes stay out, matching Levels' own Channel
+scope from last phase and this file's established "cover the plain
+command first" pattern).
+
+`document.rs`'s `Adjustment` enum gains a `Curves { points: [u8; 5] }`
+variant; `apply_adjustment` gains a match arm building the exact same
+five-point-at-`[0,64,128,192,255]` lookup table `curves`/`curves_points`
+already build via `curve_lookup` (`.expect()`, not `?`, since five
+distinct fixed x-positions can never trigger that function's own
+"fewer than two points or a shared input" errors). The destructive
+`curves` command is now a thin call onto `Adjustment::Curves` through
+`adjust_with`. No `lib.rs` change needed.
+
+The frontend's `Adjustment` type gains the matching `curves` variant; a
+new, deliberately separate `adjustmentCurvePoints` state (rather than
+reusing the Curves dialog's own richer per-channel `curvePoints`/
+`curveNodes`/`curveStore`, which track whichever channel is currently
+being edited and don't cleanly reduce to "the RGB composite's five
+values") backs five new Input 0/64/128/192/255 sliders shown only for
+this Adjustment Layer option.
+
+Extended `adjustment_layers_match_their_destructive_commands`
+(compiler-enforced exhaustive over `Adjustment` again) with a
+fourteenth case, and caught a real hand-computation error before it
+shipped: a first attempt at "the points that invert every input,"
+`[255, 192, 128, 64, 0]`, actually failed the test outright (156/56/206
+instead of 155/55/205) because the last control-point gap (192 to 255)
+is 63 wide, not 64 like the other three — a slope of exactly −1 needs
+each segment's own y-drop to equal its own x-width, so the correct
+inverting points are `(XS[i], 255 − XS[i])` = `[255, 191, 127, 63, 0]`,
+not the naively-mirrored `[255, 192, 128, 64, 0]`. With that fix, the
+suite's own base pixel (200, 100, 50) reaches exactly (55, 155, 205) —
+the same Invert result this file's very first adjustment-layer test
+already established for this pixel, now reached through a completely
+different code path (a five-point lookup table, not a direct
+subtraction) — a real cross-check the deliberate test failure earned.
+All 33 of `curves`'s own pre-existing tests pass unmodified against the
+refactored delegation. `cargo fmt`/`clippy --all-targets -D warnings`/
+`test` and `npx tsc --noEmit`/`npm run build`/`npm test` all clean.
+
+Tests: 1972 Rust (a tenth case added to the same existing test, count
+unchanged), 46 frontend (unchanged).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

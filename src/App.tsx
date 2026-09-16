@@ -657,6 +657,8 @@ function adjustmentKindLabel(kind: Adjustment["kind"]): string {
       return "Selective Color";
     case "levels":
       return "Levels";
+    case "curves":
+      return "Curves";
     default:
       return "Invert";
   }
@@ -2211,6 +2213,13 @@ export default function App() {
   const [levelsOutputBlack, setLevelsOutputBlack] = useState(0);
   const [levelsOutputWhite, setLevelsOutputWhite] = useState(255);
   const [levelsChannel, setLevelsChannel] = useState<LevelsChannel>("rgb");
+  // Adjustment Layer's own Curves option: the five fixed-input control
+  // points' output values, the same shape the plain `curves` command
+  // takes — kept separately from the Curves dialog's own richer
+  // per-channel `curvePoints`/`curveNodes`/`curveStore` state below.
+  const [adjustmentCurvePoints, setAdjustmentCurvePoints] = useState<
+    [number, number, number, number, number]
+  >([0, 64, 128, 192, 255]);
   // Levels > Auto Options: the Clip percentages in hundredths (0.10% = 10).
   const [levelsClipShadows, setLevelsClipShadows] = useState(10);
   const [levelsClipHighlights, setLevelsClipHighlights] = useState(10);
@@ -6809,6 +6818,8 @@ export default function App() {
           outputBlack: levelsOutputBlack,
           outputWhite: levelsOutputWhite,
         };
+      case "curves":
+        return { kind: "curves", points: adjustmentCurvePoints };
       default:
         return { kind: "invert" };
     }
@@ -6846,6 +6857,7 @@ export default function App() {
     levelsGamma,
     levelsOutputBlack,
     levelsOutputWhite,
+    adjustmentCurvePoints,
   ]);
 
   const addAdjustmentLayer = useCallback(async () => {
@@ -27828,8 +27840,38 @@ export default function App() {
                 <option value="gradientMap">Gradient Map</option>
                 <option value="selectiveColor">Selective Color</option>
                 <option value="levels">Levels</option>
+                <option value="curves">Curves</option>
               </select>
             </label>
+            {adjustmentKind === "curves" && (
+              <>
+                {(["0", "64", "128", "192", "255"] as const).map(
+                  (input, index) => (
+                    <label className="control" key={input}>
+                      <span className="control__label">
+                        Input {input}
+                        <span className="control__value">
+                          {adjustmentCurvePoints[index]}
+                        </span>
+                      </span>
+                      <input
+                        type="range"
+                        min={0}
+                        max={255}
+                        value={adjustmentCurvePoints[index]}
+                        onChange={(event) =>
+                          setAdjustmentCurvePoints((points) => {
+                            const next = [...points] as typeof points;
+                            next[index] = Number(event.target.value);
+                            return next;
+                          })
+                        }
+                      />
+                    </label>
+                  ),
+                )}
+              </>
+            )}
             {adjustmentKind === "levels" && (
               <>
                 <label className="control">

@@ -839,6 +839,9 @@ pub enum Adjustment {
         output_black: u8,
         output_white: u8,
     },
+    Curves {
+        points: [u8; 5],
+    },
 }
 
 impl Adjustment {
@@ -3985,7 +3988,9 @@ pub enum Fill {
 /// Map [`Document::gradient_map`]'s own two-colour lerp by luma;
 /// Selective Color [`Document::selective_color_method_with`]'s own
 /// range-weighted Relative/Absolute ink-slider blend; Levels
-/// [`Document::levels_on`]'s own input/gamma/output remap.
+/// [`Document::levels_on`]'s own input/gamma/output remap; Curves
+/// [`Document::curves`]'s own five-point lookup table, the same
+/// [`curve_lookup`] the destructive command builds.
 pub fn apply_adjustment(adjustment: Adjustment, [r, g, b]: [u8; 3]) -> [u8; 3] {
     match adjustment {
         Adjustment::Invert => [255 - r, 255 - g, 255 - b],
@@ -4168,6 +4173,12 @@ pub fn apply_adjustment(adjustment: Adjustment, [r, g, b]: [u8; 3]) -> [u8; 3] {
                 LevelsChannel::Green => [r, apply(g), b],
                 LevelsChannel::Blue => [r, g, apply(b)],
             }
+        }
+        Adjustment::Curves { points } => {
+            const XS: [u8; 5] = [0, 64, 128, 192, 255];
+            let nodes: Vec<(u8, u8)> = XS.iter().copied().zip(points).collect();
+            let lut = curve_lookup(&nodes).expect("five distinct fixed x positions never error");
+            [lut[r as usize], lut[g as usize], lut[b as usize]]
         }
     }
 }
@@ -26659,10 +26670,12 @@ impl Document {
     /// at the identity mapping (`[0, 64, 128, 192, 255]`) every input
     /// value reproduces exactly, since each segment's output span exactly
     /// matches its input span. Alpha untouched.
+    /// Now a thin call onto [`Adjustment::Curves`] through
+    /// [`Self::adjust_with`] — the same lookup table above, byte for
+    /// byte, is also what a live Adjustment Layer of this kind now
+    /// applies (`apply_adjustment`).
     pub fn curves(&mut self, id: LayerId, points: [u8; 5]) -> Result<Option<Rect>, String> {
-        const XS: [u8; 5] = [0, 64, 128, 192, 255];
-        let nodes: Vec<(u8, u8)> = XS.iter().copied().zip(points).collect();
-        self.curves_points(id, &nodes)
+        self.adjust_with(id, Adjustment::Curves { points })
     }
 
     /// [`Self::curves_points`] with Photoshop's Channel dropdown filled in:
@@ -44876,7 +44889,15 @@ mod tests {
         // stretched to 250 (gamma neutral, output the full 0..=255)
         // maps each channel's own value/250 straight to bytes: 200/250 =
         // 0.8 -> 204, 100/250 = 0.4 -> 102, 50/250 = 0.2 -> 51, all
-        // exact.
+        // exact. Curves through the five points (XS[i], 255 - XS[i]) --
+        // (0,255), (64,191), (128,127), (192,63), (255,0) -- has slope
+        // exactly -1 between every consecutive pair (each segment's y
+        // drop equals its own x width, 64 for the first three, 63 for
+        // the last), so it reproduces `255 - v` for any input -- the
+        // exact same Invert result this file's own first test already
+        // established for this base pixel, (55, 155, 205), reached by a
+        // completely different code path (a five-point lookup table,
+        // not a direct subtraction).
         for (adjustment, expected) in [
             (
                 Adjustment::BrightnessContrast {
@@ -44961,6 +44982,12 @@ mod tests {
                 },
                 [204, 102, 51],
             ),
+            (
+                Adjustment::Curves {
+                    points: [255, 191, 127, 63, 0],
+                },
+                [55, 155, 205],
+            ),
         ] {
             let (mut doc, base) = base_pixel();
             doc.add_adjustment_layer("adj", adjustment).unwrap();
@@ -45042,6 +45069,7 @@ mod tests {
                         output_white,
                     )
                     .unwrap(),
+                Adjustment::Curves { points } => baked.curves(baked_id, points).unwrap(),
             };
             assert_eq!(&live[..3], expected, "{adjustment:?}");
             assert_eq!(live, composite_at(&baked, 0), "{adjustment:?}");
