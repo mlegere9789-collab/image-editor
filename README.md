@@ -25503,6 +25503,42 @@ fmt`/`clippy --all-targets -D warnings`/`test` and `npx tsc
 Tests: 1972 Rust (a fifth case added to the same existing test, count
 unchanged), 46 frontend (unchanged).
 
+## Phase 440 — Adjustment Layer's Channel Mixer
+
+A sixth kind off Adjustment Layer's own documented scope cut, same
+template as Phases 435-439: Channel Mixer is also a pure per-pixel
+function (a 3×4 weighted-sum matrix, no external state), so it slots
+into `Adjustment`/`apply_adjustment` the same way.
+
+`document.rs`'s `Adjustment` enum gains a `ChannelMixer { matrix:
+[[i32; 4]; 3] }` variant; `apply_adjustment` gains a match arm carrying
+`channel_mixer`'s own exact formula — each output channel is a weighted
+sum of all three input channels plus a constant, coefficients scaled
+from Photoshop's own `-200..=200` percent range. The destructive
+`channel_mixer` command is now a thin call onto `Adjustment::ChannelMixer`
+through `adjust_with`, the same refactor the last five phases went
+through. No `lib.rs` change needed.
+
+The frontend's `Adjustment` type gains the matching `channelMixer`
+variant; the Adjustment Layer dialog gained a Channel Mixer option
+showing the exact same R/G/B/Constant × R/G/B table the standalone
+Channel Mixer dialog already has, reusing that dialog's own
+`channelMixerMatrix` state and `setChannelMixerCell` setter rather than
+duplicating either.
+
+Extended `adjustment_layers_match_their_destructive_commands`
+(compiler-enforced exhaustive over `Adjustment` again) with a tenth
+case: a channel-swap matrix (row 0 pulls 100% from G, row 1 pulls 100%
+from R, row 2 unchanged) over the suite's own base pixel (200, 100, 50)
+— since `to_byte(to_unit(x))` round-trips exactly for any byte `x`,
+the swap lands at exactly (100, 200, 50). All 9 of `channel_mixer`'s
+own pre-existing tests pass unmodified against the refactored
+delegation. `cargo fmt`/`clippy --all-targets -D warnings`/`test` and
+`npx tsc --noEmit`/`npm run build`/`npm test` all clean.
+
+Tests: 1972 Rust (a sixth case added to the same existing test, count
+unchanged), 46 frontend (unchanged).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

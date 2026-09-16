@@ -816,6 +816,9 @@ pub enum Adjustment {
         saturation: i32,
     },
     BlackAndWhite,
+    ChannelMixer {
+        matrix: [[i32; 4]; 3],
+    },
 }
 
 impl Adjustment {
@@ -3932,7 +3935,9 @@ pub enum Fill {
 /// [`Document::photo_filter`]'s own per-channel lerp toward `color` by
 /// `density`; Vibrance [`Document::vibrance`]'s own saturation-protecting
 /// boost followed by a uniform saturation slider; Black & White
-/// [`Document::black_and_white`]'s own fixed BT.601 luma weighting.
+/// [`Document::black_and_white`]'s own fixed BT.601 luma weighting;
+/// Channel Mixer [`Document::channel_mixer`]'s own per-output-channel
+/// weighted sum of all three input channels plus a constant.
 pub fn apply_adjustment(adjustment: Adjustment, [r, g, b]: [u8; 3]) -> [u8; 3] {
     match adjustment {
         Adjustment::Invert => [255 - r, 255 - g, 255 - b],
@@ -4026,6 +4031,22 @@ pub fn apply_adjustment(adjustment: Adjustment, [r, g, b]: [u8; 3]) -> [u8; 3] {
         Adjustment::BlackAndWhite => {
             let luma = to_byte(0.299 * to_unit(r) + 0.587 * to_unit(g) + 0.114 * to_unit(b));
             [luma, luma, luma]
+        }
+        Adjustment::ChannelMixer { matrix } => {
+            let matrix: Vec<[f32; 4]> = matrix
+                .iter()
+                .map(|row| {
+                    [
+                        row[0].clamp(-200, 200) as f32 / 100.0,
+                        row[1].clamp(-200, 200) as f32 / 100.0,
+                        row[2].clamp(-200, 200) as f32 / 100.0,
+                        row[3].clamp(-200, 200) as f32 / 255.0,
+                    ]
+                })
+                .collect();
+            let (ru, gu, bu) = (to_unit(r), to_unit(g), to_unit(b));
+            let mix = |row: &[f32; 4]| to_byte(ru * row[0] + gu * row[1] + bu * row[2] + row[3]);
+            [mix(&matrix[0]), mix(&matrix[1]), mix(&matrix[2])]
         }
     }
 }
@@ -26105,28 +26126,16 @@ impl Document {
     /// and negative weights invert a channel's contribution — this one
     /// command subsumes plain channel-swap and channel-invert tricks
     /// Photoshop users often reach for Channel Mixer to do. Alpha
-    /// untouched.
+    /// untouched. Now a thin call onto [`Adjustment::ChannelMixer`]
+    /// through [`Self::adjust_with`] — the same formula above, byte for
+    /// byte, is also what a live Adjustment Layer of this kind now
+    /// applies (`apply_adjustment`).
     pub fn channel_mixer(
         &mut self,
         id: LayerId,
         matrix: [[i32; 4]; 3],
     ) -> Result<Option<Rect>, String> {
-        let matrix: Vec<[f32; 4]> = matrix
-            .iter()
-            .map(|row| {
-                [
-                    row[0].clamp(-200, 200) as f32 / 100.0,
-                    row[1].clamp(-200, 200) as f32 / 100.0,
-                    row[2].clamp(-200, 200) as f32 / 100.0,
-                    row[3].clamp(-200, 200) as f32 / 255.0,
-                ]
-            })
-            .collect();
-        self.adjust_layer_pixels(id, move |[r, g, b, a]| {
-            let (ru, gu, bu) = (to_unit(r), to_unit(g), to_unit(b));
-            let mix = |row: &[f32; 4]| to_byte(ru * row[0] + gu * row[1] + bu * row[2] + row[3]);
-            [mix(&matrix[0]), mix(&matrix[1]), mix(&matrix[2]), a]
-        })
+        self.adjust_with(id, Adjustment::ChannelMixer { matrix })
     }
 
     /// Image > Adjustments > Levels: the classic histogram remap, applied
@@ -44759,6 +44768,10 @@ mod tests {
         // 50/153*255 = 250/3 = 83.33... -> 83, b = 0. Black & White's
         // luma over the base pixel is exactly 124.2 (0.299*200 +
         // 0.587*100 + 0.114*50), rounding to 124 for all three channels.
+        // Channel Mixer with a swap matrix (row 0 pulls 100% from G, row
+        // 1 pulls 100% from R, row 2 unchanged) swaps R and G outright:
+        // to_byte(to_unit(x)) round-trips exactly for any byte x, so the
+        // base pixel (200, 100, 50) becomes (100, 200, 50) exactly.
         for (adjustment, expected) in [
             (
                 Adjustment::BrightnessContrast {
@@ -44808,6 +44821,12 @@ mod tests {
                 [250, 83, 0],
             ),
             (Adjustment::BlackAndWhite, [124, 124, 124]),
+            (
+                Adjustment::ChannelMixer {
+                    matrix: [[0, 100, 0, 0], [100, 0, 0, 0], [0, 0, 100, 0]],
+                },
+                [100, 200, 50],
+            ),
         ] {
             let (mut doc, base) = base_pixel();
             doc.add_adjustment_layer("adj", adjustment).unwrap();
@@ -44850,6 +44869,9 @@ mod tests {
                     saturation,
                 } => baked.vibrance(baked_id, vibrance, saturation).unwrap(),
                 Adjustment::BlackAndWhite => baked.black_and_white(baked_id).unwrap(),
+                Adjustment::ChannelMixer { matrix } => {
+                    baked.channel_mixer(baked_id, matrix).unwrap()
+                }
             };
             assert_eq!(&live[..3], expected, "{adjustment:?}");
             assert_eq!(live, composite_at(&baked, 0), "{adjustment:?}");

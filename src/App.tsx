@@ -649,6 +649,8 @@ function adjustmentKindLabel(kind: Adjustment["kind"]): string {
       return "Vibrance";
     case "blackAndWhite":
       return "Black & White";
+    case "channelMixer":
+      return "Channel Mixer";
     default:
       return "Invert";
   }
@@ -6773,6 +6775,8 @@ export default function App() {
         };
       case "blackAndWhite":
         return { kind: "blackAndWhite" };
+      case "channelMixer":
+        return { kind: "channelMixer", matrix: channelMixerMatrix };
       default:
         return { kind: "invert" };
     }
@@ -6795,6 +6799,7 @@ export default function App() {
     photoFilterDensity,
     vibrance,
     vibranceSaturation,
+    channelMixerMatrix,
   ]);
 
   const addAdjustmentLayer = useCallback(async () => {
@@ -27773,8 +27778,46 @@ export default function App() {
                 <option value="photoFilter">Photo Filter</option>
                 <option value="vibrance">Vibrance</option>
                 <option value="blackAndWhite">Black &amp; White</option>
+                <option value="channelMixer">Channel Mixer</option>
               </select>
             </label>
+            {adjustmentKind === "channelMixer" && (
+              <table className="channel-mixer">
+                <thead>
+                  <tr>
+                    <th />
+                    <th>R</th>
+                    <th>G</th>
+                    <th>B</th>
+                    <th>Constant</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(["R", "G", "B"] as const).map((label, row) => (
+                    <tr key={label}>
+                      <th>{label}</th>
+                      {channelMixerMatrix[row].map((value, col) => (
+                        <td key={col}>
+                          <input
+                            type="number"
+                            min={-200}
+                            max={200}
+                            value={value}
+                            onChange={(event) =>
+                              setChannelMixerCell(
+                                row,
+                                col,
+                                Number(event.target.value),
+                              )
+                            }
+                          />
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
             {adjustmentKind === "vibrance" && (
               <>
                 <label className="control">
