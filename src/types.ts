@@ -242,6 +242,15 @@ export type Adjustment =
       yellow: number;
       black: number;
       method: SelectiveColorMethod;
+    }
+  | {
+      kind: "levels";
+      channel: LevelsChannel;
+      inputBlack: number;
+      inputWhite: number;
+      gamma: number;
+      outputBlack: number;
+      outputWhite: number;
     };
 
 /** Mirrors `NeuralFilterKind` in src-tauri/src/document.rs (serde

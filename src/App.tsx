@@ -655,6 +655,8 @@ function adjustmentKindLabel(kind: Adjustment["kind"]): string {
       return "Gradient Map";
     case "selectiveColor":
       return "Selective Color";
+    case "levels":
+      return "Levels";
     default:
       return "Invert";
   }
@@ -6797,6 +6799,16 @@ export default function App() {
           black: selectiveColorBlack,
           method: selectiveColorMethod,
         };
+      case "levels":
+        return {
+          kind: "levels",
+          channel: levelsChannel,
+          inputBlack: levelsInputBlack,
+          inputWhite: levelsInputWhite,
+          gamma: levelsGamma,
+          outputBlack: levelsOutputBlack,
+          outputWhite: levelsOutputWhite,
+        };
       default:
         return { kind: "invert" };
     }
@@ -6828,6 +6840,12 @@ export default function App() {
     selectiveColorYellow,
     selectiveColorBlack,
     selectiveColorMethod,
+    levelsChannel,
+    levelsInputBlack,
+    levelsInputWhite,
+    levelsGamma,
+    levelsOutputBlack,
+    levelsOutputWhite,
   ]);
 
   const addAdjustmentLayer = useCallback(async () => {
@@ -27809,8 +27827,112 @@ export default function App() {
                 <option value="channelMixer">Channel Mixer</option>
                 <option value="gradientMap">Gradient Map</option>
                 <option value="selectiveColor">Selective Color</option>
+                <option value="levels">Levels</option>
               </select>
             </label>
+            {adjustmentKind === "levels" && (
+              <>
+                <label className="control">
+                  <span className="control__label">Channel</span>
+                  <select
+                    value={levelsChannel}
+                    onChange={(event) =>
+                      setLevelsChannel(event.target.value as LevelsChannel)
+                    }
+                  >
+                    <option value="rgb">RGB</option>
+                    <option value="red">Red</option>
+                    <option value="green">Green</option>
+                    <option value="blue">Blue</option>
+                  </select>
+                </label>
+                <label className="control">
+                  <span className="control__label">
+                    Input Black
+                    <span className="control__value">
+                      {levelsInputBlack}
+                    </span>
+                  </span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={255}
+                    value={levelsInputBlack}
+                    onChange={(event) =>
+                      setLevelsInputBlack(Number(event.target.value))
+                    }
+                  />
+                </label>
+                <label className="control">
+                  <span className="control__label">
+                    Input White
+                    <span className="control__value">
+                      {levelsInputWhite}
+                    </span>
+                  </span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={255}
+                    value={levelsInputWhite}
+                    onChange={(event) =>
+                      setLevelsInputWhite(Number(event.target.value))
+                    }
+                  />
+                </label>
+                <label className="control">
+                  <span className="control__label">
+                    Gamma
+                    <span className="control__value">
+                      {(levelsGamma / 100).toFixed(2)}
+                    </span>
+                  </span>
+                  <input
+                    type="range"
+                    min={10}
+                    max={300}
+                    value={levelsGamma}
+                    onChange={(event) =>
+                      setLevelsGamma(Number(event.target.value))
+                    }
+                  />
+                </label>
+                <label className="control">
+                  <span className="control__label">
+                    Output Black
+                    <span className="control__value">
+                      {levelsOutputBlack}
+                    </span>
+                  </span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={255}
+                    value={levelsOutputBlack}
+                    onChange={(event) =>
+                      setLevelsOutputBlack(Number(event.target.value))
+                    }
+                  />
+                </label>
+                <label className="control">
+                  <span className="control__label">
+                    Output White
+                    <span className="control__value">
+                      {levelsOutputWhite}
+                    </span>
+                  </span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={255}
+                    value={levelsOutputWhite}
+                    onChange={(event) =>
+                      setLevelsOutputWhite(Number(event.target.value))
+                    }
+                  />
+                </label>
+              </>
+            )}
             {adjustmentKind === "selectiveColor" && (
               <>
                 <label className="control">

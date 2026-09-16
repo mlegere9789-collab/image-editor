@@ -831,6 +831,14 @@ pub enum Adjustment {
         black: i32,
         method: SelectiveColorMethod,
     },
+    Levels {
+        channel: LevelsChannel,
+        input_black: u8,
+        input_white: u8,
+        gamma: i32,
+        output_black: u8,
+        output_white: u8,
+    },
 }
 
 impl Adjustment {
@@ -3976,7 +3984,8 @@ pub enum Fill {
 /// weighted sum of all three input channels plus a constant; Gradient
 /// Map [`Document::gradient_map`]'s own two-colour lerp by luma;
 /// Selective Color [`Document::selective_color_method_with`]'s own
-/// range-weighted Relative/Absolute ink-slider blend.
+/// range-weighted Relative/Absolute ink-slider blend; Levels
+/// [`Document::levels_on`]'s own input/gamma/output remap.
 pub fn apply_adjustment(adjustment: Adjustment, [r, g, b]: [u8; 3]) -> [u8; 3] {
     match adjustment {
         Adjustment::Invert => [255 - r, 255 - g, 255 - b],
@@ -4133,6 +4142,32 @@ pub fn apply_adjustment(adjustment: Adjustment, [r, g, b]: [u8; 3]) -> [u8; 3] {
                 gf.round().clamp(0.0, 255.0) as u8,
                 bf.round().clamp(0.0, 255.0) as u8,
             ]
+        }
+        Adjustment::Levels {
+            channel,
+            input_black,
+            input_white,
+            gamma,
+            output_black,
+            output_white,
+        } => {
+            let input_black = input_black as f32;
+            let input_white = (input_white as f32).max(input_black + 1.0);
+            let exponent = 100.0 / gamma.clamp(1, 999) as f32;
+            let output_black = to_unit(output_black);
+            let output_white = to_unit(output_white);
+            let apply = |c: u8| {
+                let normalized =
+                    ((c as f32 - input_black) / (input_white - input_black)).clamp(0.0, 1.0);
+                let corrected = normalized.powf(exponent);
+                to_byte(output_black + corrected * (output_white - output_black))
+            };
+            match channel {
+                LevelsChannel::Rgb => [apply(r), apply(g), apply(b)],
+                LevelsChannel::Red => [apply(r), g, b],
+                LevelsChannel::Green => [r, apply(g), b],
+                LevelsChannel::Blue => [r, g, apply(b)],
+            }
         }
     }
 }
@@ -26580,7 +26615,10 @@ impl Document {
     /// all three channels exactly as `levels` does, while `Red`, `Green`,
     /// or `Blue` puts only that one channel through the remap and leaves
     /// the other two (and alpha) untouched — the way a per-channel Levels
-    /// move tints an image rather than re-toning it.
+    /// move tints an image rather than re-toning it. Now a thin call
+    /// onto [`Adjustment::Levels`] through [`Self::adjust_with`] — the
+    /// same formula above, byte for byte, is also what a live Adjustment
+    /// Layer of this kind now applies (`apply_adjustment`).
     #[allow(clippy::too_many_arguments)]
     pub fn levels_on(
         &mut self,
@@ -26592,25 +26630,17 @@ impl Document {
         output_black: u8,
         output_white: u8,
     ) -> Result<Option<Rect>, String> {
-        let input_black = input_black as f32;
-        let input_white = (input_white as f32).max(input_black + 1.0);
-        let exponent = 100.0 / gamma.clamp(1, 999) as f32;
-        let output_black = to_unit(output_black);
-        let output_white = to_unit(output_white);
-        self.adjust_layer_pixels(id, move |[r, g, b, a]| {
-            let apply = |c: u8| {
-                let normalized =
-                    ((c as f32 - input_black) / (input_white - input_black)).clamp(0.0, 1.0);
-                let corrected = normalized.powf(exponent);
-                to_byte(output_black + corrected * (output_white - output_black))
-            };
-            match channel {
-                LevelsChannel::Rgb => [apply(r), apply(g), apply(b), a],
-                LevelsChannel::Red => [apply(r), g, b, a],
-                LevelsChannel::Green => [r, apply(g), b, a],
-                LevelsChannel::Blue => [r, g, apply(b), a],
-            }
-        })
+        self.adjust_with(
+            id,
+            Adjustment::Levels {
+                channel,
+                input_black,
+                input_white,
+                gamma,
+                output_black,
+                output_white,
+            },
+        )
     }
 
     /// Image > Adjustments > Curves: a tone curve applied identically to
@@ -44842,7 +44872,11 @@ mod tests {
         // 0.9703125 exactly; cyan 100 Absolute subtracts
         // 0.9703125*255 = 247.4296875 from r (200 - 247.4... is clearly
         // negative, clamping to 0), while magenta/yellow/black all zero
-        // leave g and b untouched at 100 and 50.
+        // leave g and b untouched at 100 and 50. Levels with input white
+        // stretched to 250 (gamma neutral, output the full 0..=255)
+        // maps each channel's own value/250 straight to bytes: 200/250 =
+        // 0.8 -> 204, 100/250 = 0.4 -> 102, 50/250 = 0.2 -> 51, all
+        // exact.
         for (adjustment, expected) in [
             (
                 Adjustment::BrightnessContrast {
@@ -44916,6 +44950,17 @@ mod tests {
                 },
                 [0, 100, 50],
             ),
+            (
+                Adjustment::Levels {
+                    channel: LevelsChannel::Rgb,
+                    input_black: 0,
+                    input_white: 250,
+                    gamma: 100,
+                    output_black: 0,
+                    output_white: 255,
+                },
+                [204, 102, 51],
+            ),
         ] {
             let (mut doc, base) = base_pixel();
             doc.add_adjustment_layer("adj", adjustment).unwrap();
@@ -44977,6 +45022,24 @@ mod tests {
                 } => baked
                     .selective_color_method_with(
                         baked_id, range, cyan, magenta, yellow, black, method,
+                    )
+                    .unwrap(),
+                Adjustment::Levels {
+                    channel,
+                    input_black,
+                    input_white,
+                    gamma,
+                    output_black,
+                    output_white,
+                } => baked
+                    .levels_on(
+                        baked_id,
+                        channel,
+                        input_black,
+                        input_white,
+                        gamma,
+                        output_black,
+                        output_white,
                     )
                     .unwrap(),
             };

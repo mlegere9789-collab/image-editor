@@ -25626,6 +25626,52 @@ all clean.
 Tests: 1972 Rust (an eighth case added to the same existing test, count
 unchanged), 46 frontend (unchanged).
 
+## Phase 443 — Adjustment Layer's Levels
+
+A ninth kind off Adjustment Layer's own documented scope cut, same
+template as the rest of Phases 435-442: Levels (Photoshop's Channel
+dropdown included) is also a pure per-pixel function — an input/gamma/
+output remap with no external state — so it slots into `Adjustment`/
+`apply_adjustment` the same way. Replace Color, one of the few
+remaining kinds, was checked and ruled out for this treatment: its
+`targets` list is an arbitrary-length `Vec`, which can't sit in a
+`Copy` enum variant the way every other field here does — a genuine
+architectural mismatch, not something to force.
+
+`document.rs`'s `Adjustment` enum gains a `Levels { channel:
+LevelsChannel, input_black: u8, input_white: u8, gamma: i32,
+output_black: u8, output_white: u8 }` variant; `apply_adjustment` gains
+a match arm carrying `levels_on`'s own exact formula — each channel
+normalized between the input black/white points, raised to a gamma
+exponent, then rescaled into the output black/white range, with the
+Channel dropdown picking RGB or one lone channel. The destructive
+`levels_on` command (which `levels` itself already delegates to) is now
+a thin call onto `Adjustment::Levels` through `adjust_with`. No `lib.rs`
+change needed.
+
+The frontend's `Adjustment` type gains the matching `levels` variant,
+reusing the already-existing `LevelsChannel` type; the Adjustment Layer
+dialog gained a Levels option showing the exact same Channel select and
+Input Black/Input White/Gamma/Output Black/Output White sliders the
+standalone Levels dialog already has (its Auto-only Clip%/Targets/
+Algorithm controls stay out, since Levels Auto is its own separate
+command, not part of this remap), reusing that dialog's own state
+rather than duplicating it.
+
+Extended `adjustment_layers_match_their_destructive_commands`
+(compiler-enforced exhaustive over `Adjustment` again) with a
+thirteenth case: Levels with input white stretched to 250 (gamma and
+output range both left neutral) over the suite's own base pixel (200,
+100, 50) maps each channel's own `value/250` straight to a byte:
+`200/250 = 0.8` → 204, `100/250 = 0.4` → 102, `50/250 = 0.2` → 51, all
+exact. All 39 of `levels`'/`levels_on`'s own pre-existing tests pass
+unmodified against the refactored delegation. `cargo fmt`/`clippy
+--all-targets -D warnings`/`test` and `npx tsc --noEmit`/`npm run
+build`/`npm test` all clean.
+
+Tests: 1972 Rust (a ninth case added to the same existing test, count
+unchanged), 46 frontend (unchanged).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
