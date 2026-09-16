@@ -651,6 +651,8 @@ function adjustmentKindLabel(kind: Adjustment["kind"]): string {
       return "Black & White";
     case "channelMixer":
       return "Channel Mixer";
+    case "gradientMap":
+      return "Gradient Map";
     default:
       return "Invert";
   }
@@ -6777,6 +6779,12 @@ export default function App() {
         return { kind: "blackAndWhite" };
       case "channelMixer":
         return { kind: "channelMixer", matrix: channelMixerMatrix };
+      case "gradientMap":
+        return {
+          kind: "gradientMap",
+          shadowColor: hexToRgb(gradientMapShadow),
+          highlightColor: hexToRgb(gradientMapHighlight),
+        };
       default:
         return { kind: "invert" };
     }
@@ -6800,6 +6808,8 @@ export default function App() {
     vibrance,
     vibranceSaturation,
     channelMixerMatrix,
+    gradientMapShadow,
+    gradientMapHighlight,
   ]);
 
   const addAdjustmentLayer = useCallback(async () => {
@@ -27779,8 +27789,35 @@ export default function App() {
                 <option value="vibrance">Vibrance</option>
                 <option value="blackAndWhite">Black &amp; White</option>
                 <option value="channelMixer">Channel Mixer</option>
+                <option value="gradientMap">Gradient Map</option>
               </select>
             </label>
+            {adjustmentKind === "gradientMap" && (
+              <>
+                <label className="control control--row">
+                  <span className="control__label">Shadows</span>
+                  <input
+                    type="color"
+                    className="tools__color"
+                    value={gradientMapShadow}
+                    onChange={(event) =>
+                      setGradientMapShadow(event.target.value)
+                    }
+                  />
+                </label>
+                <label className="control control--row">
+                  <span className="control__label">Highlights</span>
+                  <input
+                    type="color"
+                    className="tools__color"
+                    value={gradientMapHighlight}
+                    onChange={(event) =>
+                      setGradientMapHighlight(event.target.value)
+                    }
+                  />
+                </label>
+              </>
+            )}
             {adjustmentKind === "channelMixer" && (
               <table className="channel-mixer">
                 <thead>

@@ -25539,6 +25539,44 @@ delegation. `cargo fmt`/`clippy --all-targets -D warnings`/`test` and
 Tests: 1972 Rust (a sixth case added to the same existing test, count
 unchanged), 46 frontend (unchanged).
 
+## Phase 441 — Adjustment Layer's Gradient Map
+
+A seventh kind off Adjustment Layer's own documented scope cut, same
+template as Phases 435-440: Gradient Map is also a pure per-pixel
+function (a two-colour lerp by BT.601 luma, no external state), so it
+slots into `Adjustment`/`apply_adjustment` the same way.
+
+`document.rs`'s `Adjustment` enum gains a `GradientMap { shadow_color:
+[u8; 3], highlight_color: [u8; 3] }` variant; `apply_adjustment` gains a
+match arm carrying `gradient_map`'s own exact formula — each channel
+lerped between the shadow and highlight colour's own value by the
+pixel's own luma. The destructive `gradient_map` command is now a thin
+call onto `Adjustment::GradientMap` through `adjust_with`, the same
+refactor the last six phases went through. No `lib.rs` change needed.
+
+The frontend's `Adjustment` type gains the matching `gradientMap`
+variant (`shadowColor`/`highlightColor`, serde's `rename_all =
+"camelCase"` turning the Rust struct's snake_case fields into these,
+the same way `dualBrushSizePercent` already does for `BrushDynamics`);
+the Adjustment Layer dialog gained a Gradient Map option reusing the
+standalone Gradient Map dialog's own `gradientMapShadow`/
+`gradientMapHighlight` hex-colour state (converted through the existing
+`hexToRgb`) rather than duplicating it.
+
+Extended `adjustment_layers_match_their_destructive_commands`
+(compiler-enforced exhaustive over `Adjustment` again) with an eleventh
+case: Gradient Map from `(0, 10, 20)` to `(255, 10, 20)` over the
+suite's own base pixel (200, 100, 50) keeps G and B constant at 10 and
+20 (a lerp between two equal values never moves) and lerps R from 0 to
+255 by the base pixel's own luma, `124.2/255`, landing at exactly 124 —
+`to_byte(124.2/255)`. All 7 of `gradient_map`'s own pre-existing tests
+pass unmodified against the refactored delegation. `cargo fmt`/`clippy
+--all-targets -D warnings`/`test` and `npx tsc --noEmit`/`npm run
+build`/`npm test` all clean.
+
+Tests: 1972 Rust (a seventh case added to the same existing test, count
+unchanged), 46 frontend (unchanged).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

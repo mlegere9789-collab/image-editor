@@ -819,6 +819,10 @@ pub enum Adjustment {
     ChannelMixer {
         matrix: [[i32; 4]; 3],
     },
+    GradientMap {
+        shadow_color: [u8; 3],
+        highlight_color: [u8; 3],
+    },
 }
 
 impl Adjustment {
@@ -3937,7 +3941,8 @@ pub enum Fill {
 /// boost followed by a uniform saturation slider; Black & White
 /// [`Document::black_and_white`]'s own fixed BT.601 luma weighting;
 /// Channel Mixer [`Document::channel_mixer`]'s own per-output-channel
-/// weighted sum of all three input channels plus a constant.
+/// weighted sum of all three input channels plus a constant; Gradient
+/// Map [`Document::gradient_map`]'s own two-colour lerp by luma.
 pub fn apply_adjustment(adjustment: Adjustment, [r, g, b]: [u8; 3]) -> [u8; 3] {
     match adjustment {
         Adjustment::Invert => [255 - r, 255 - g, 255 - b],
@@ -4047,6 +4052,20 @@ pub fn apply_adjustment(adjustment: Adjustment, [r, g, b]: [u8; 3]) -> [u8; 3] {
             let (ru, gu, bu) = (to_unit(r), to_unit(g), to_unit(b));
             let mix = |row: &[f32; 4]| to_byte(ru * row[0] + gu * row[1] + bu * row[2] + row[3]);
             [mix(&matrix[0]), mix(&matrix[1]), mix(&matrix[2])]
+        }
+        Adjustment::GradientMap {
+            shadow_color,
+            highlight_color,
+        } => {
+            let luma = 0.299 * to_unit(r) + 0.587 * to_unit(g) + 0.114 * to_unit(b);
+            let map = |channel: usize| {
+                to_byte(lerp(
+                    to_unit(shadow_color[channel]),
+                    to_unit(highlight_color[channel]),
+                    luma,
+                ))
+            };
+            [map(0), map(1), map(2)]
         }
     }
 }
@@ -26092,24 +26111,23 @@ impl Document {
     /// straight two-colour line between the shadow and highlight colours,
     /// the same two-stop-gradient scope [`Self::gradient_fill`] already
     /// uses for its own gradients — a deliberate scope cut, not an
-    /// oversight. Alpha untouched.
+    /// oversight. Alpha untouched. Now a thin call onto
+    /// [`Adjustment::GradientMap`] through [`Self::adjust_with`] — the
+    /// same formula above, byte for byte, is also what a live Adjustment
+    /// Layer of this kind now applies (`apply_adjustment`).
     pub fn gradient_map(
         &mut self,
         id: LayerId,
         shadow_color: [u8; 3],
         highlight_color: [u8; 3],
     ) -> Result<Option<Rect>, String> {
-        self.adjust_layer_pixels(id, move |[r, g, b, a]| {
-            let luma = 0.299 * to_unit(r) + 0.587 * to_unit(g) + 0.114 * to_unit(b);
-            let map = |channel: usize| {
-                to_byte(lerp(
-                    to_unit(shadow_color[channel]),
-                    to_unit(highlight_color[channel]),
-                    luma,
-                ))
-            };
-            [map(0), map(1), map(2), a]
-        })
+        self.adjust_with(
+            id,
+            Adjustment::GradientMap {
+                shadow_color,
+                highlight_color,
+            },
+        )
     }
 
     /// Image > Adjustments > Channel Mixer: builds each output channel as
@@ -44772,6 +44790,10 @@ mod tests {
         // 1 pulls 100% from R, row 2 unchanged) swaps R and G outright:
         // to_byte(to_unit(x)) round-trips exactly for any byte x, so the
         // base pixel (200, 100, 50) becomes (100, 200, 50) exactly.
+        // Gradient Map from (0, 10, 20) to (255, 10, 20) keeps G and B
+        // constant at 10 and 20 (lerp between two equal values) and
+        // lerps R from 0 to 255 by the base pixel's own luma, 124.2/255
+        // -> to_byte(124.2/255) = 124.
         for (adjustment, expected) in [
             (
                 Adjustment::BrightnessContrast {
@@ -44827,6 +44849,13 @@ mod tests {
                 },
                 [100, 200, 50],
             ),
+            (
+                Adjustment::GradientMap {
+                    shadow_color: [0, 10, 20],
+                    highlight_color: [255, 10, 20],
+                },
+                [124, 10, 20],
+            ),
         ] {
             let (mut doc, base) = base_pixel();
             doc.add_adjustment_layer("adj", adjustment).unwrap();
@@ -44872,6 +44901,12 @@ mod tests {
                 Adjustment::ChannelMixer { matrix } => {
                     baked.channel_mixer(baked_id, matrix).unwrap()
                 }
+                Adjustment::GradientMap {
+                    shadow_color,
+                    highlight_color,
+                } => baked
+                    .gradient_map(baked_id, shadow_color, highlight_color)
+                    .unwrap(),
             };
             assert_eq!(&live[..3], expected, "{adjustment:?}");
             assert_eq!(live, composite_at(&baked, 0), "{adjustment:?}");
