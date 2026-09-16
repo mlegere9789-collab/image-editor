@@ -26380,6 +26380,52 @@ Tests: 1994 Rust (1991 → 1994, 1987 lib + 7 pipeline — three new
 `#[test]`s, one per dither method), 51 frontend (unchanged — the new
 Dither dropdown is plain UI, no new frontend-testable logic).
 
+## Phase 459 — Color Lookup reads real 1D `.cube` LUTs too
+
+Color Lookup's `.cube` reader rejected any file declaring
+`LUT_1D_SIZE`, only accepting `LUT_3D_SIZE` grids. Researched Adobe's
+own published `.cube` file specification (the IRIDAS format Adobe
+itself publishes) and confirmed `LUT_1D_SIZE n` is a real, first-class
+alternative header, not a lesser or unsupported variant: it's followed
+by `n` RGB triples read as three completely independent per-channel
+curves (each channel's own value at input level `i / (n-1)` is that
+row's own matching component) rather than one shared 3D grid.
+
+`parse_cube` now returns a new `ColorLut` enum (`ThreeD(Lut3d)` |
+`OneD(Lut1d)`) instead of a bare `Lut3d`, branching on whichever size
+header the file actually declares. A new `Lut1d` struct mirrors
+`Lut3d`'s own shape (`size`, `table`, `domain`) with its own `sample`:
+each of the three channels linearly interpolated against its own
+column of the table, entirely independent of the other two —
+genuinely different from `Lut3d::sample`'s trilinear grid lookup, not
+a relabeling. `Document::color_lookup` takes `&ColorLut` and calls its
+uniform `.sample()`, unaware of which real format the file was. The
+file-picker label changed from "3D LUT (.cube)" to "LUT (.cube)" — the
+file type Photoshop's own dialog accepts either way.
+
+**Verified two ways.** `a_1d_cube_applies_three_independent_per_channel_curves`
+uses a 3-row `LUT_1D_SIZE 3` file with three deliberately different
+curves — R squares (`[0, 0.25, 1]`, the same curve the existing 3D
+grid test already uses), G is the identity (`[0, 0.5, 1]`), B is R's
+own curve mirrored (`[1, 0.75, 0]`) — applied to a single pixel
+`(64, 64, 64)`, the same byte on every channel. `to_unit(64) = 64/255`
+lands in each curve's own first segment at `t = 128/255` exactly, and
+every one of the three interpolated results lands on an exact byte
+(`32/255`, `64/255`, `223/255`, each an exact multiple of `1/255`, no
+rounding ambiguity) — R comes out 32, G comes out 64 (unchanged,
+proving the identity curve), B comes out 223, three genuinely
+different outputs from one input byte, proving real per-channel
+independence rather than one shared curve applied three times. Every
+existing 3D-cube test was re-run unchanged (only their own direct
+`Lut3d` field access was mechanically updated to pattern-match the new
+`ColorLut` wrapper) and still passes with its own original values.
+`cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`,
+`cargo test` (full suite), `npx tsc --noEmit`, and `npm run build` all
+clean.
+
+Tests: 1995 Rust (1994 → 1995, 1988 lib + 7 pipeline — one new
+`#[test]`), 51 frontend (unchanged — only a file-picker label changed).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

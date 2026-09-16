@@ -146,7 +146,7 @@ const HDR_FILTER = [{ name: "Radiance HDR", extensions: ["hdr", "pic"] }];
 const PROJECT_FILTER = [
   { name: "LegeLabs Photo Editing Suite Project", extensions: ["iep"] },
 ];
-const CUBE_FILTER = [{ name: "3D LUT (.cube)", extensions: ["cube", "CUBE"] }];
+const CUBE_FILTER = [{ name: "LUT (.cube)", extensions: ["cube", "CUBE"] }];
 
 /** Edit > Toolbar (Customize Toolbar): every persistent tool-selection
  * button in the toolbar, in the order it appears there — the same scope
@@ -14957,7 +14957,7 @@ export default function App() {
             className="button button--quiet"
             onClick={() => void applyColorLookup()}
             disabled={busy || !canPaint}
-            title="Image > Adjustments > Color Lookup: apply a .cube 3D LUT file to the selected layer"
+            title="Image > Adjustments > Color Lookup: apply a .cube LUT file (3D grid or 1D per-channel curves) to the selected layer"
           >
             Color Lookup…
           </button>

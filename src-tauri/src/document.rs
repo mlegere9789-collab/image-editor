@@ -1759,12 +1759,77 @@ impl Lut3d {
     }
 }
 
-/// Parses an Adobe/IRIDAS `.cube` file: `LUT_3D_SIZE n` (2 or more),
-/// optional `TITLE`, `DOMAIN_MIN`, and `DOMAIN_MAX` lines, `#` comments,
-/// and exactly `n³` lines of three numbers. 1D cubes (`LUT_1D_SIZE`) are a
-/// documented scope cut.
-pub fn parse_cube(text: &str) -> Result<Lut3d, String> {
-    let mut size: Option<usize> = None;
+/// A 1D colour lookup table — Image > Adjustments > Color Lookup's own
+/// `.cube` files with `LUT_1D_SIZE` instead of `LUT_3D_SIZE`: `size`
+/// RGB triples, each channel applied as its own independent curve rather
+/// than a 3D grid (Adobe's own published `.cube` file specification,
+/// confirmed directly: `LUT_1D_SIZE n` is a first-class alternative
+/// header to `LUT_3D_SIZE`, the following `n` triples read as three
+/// separate per-channel curves).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Lut1d {
+    pub size: usize,
+    pub table: Vec<[f32; 3]>,
+    pub domain: ([f32; 3], [f32; 3]),
+}
+
+impl Lut1d {
+    /// Each of `rgb`'s three channels linearly interpolated against its
+    /// own column of the table — channel `c`'s curve is `table[i][c]`
+    /// at input level `i / (size - 1)`, entirely independent of the
+    /// other two channels' own curves.
+    pub fn sample(&self, rgb: [f32; 3]) -> [f32; 3] {
+        let n = self.size;
+        let (lo, hi) = self.domain;
+        let mut out = [0f32; 3];
+        for c in 0..3 {
+            let span = hi[c] - lo[c];
+            let v = if span > 0.0 {
+                ((rgb[c] - lo[c]) / span).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            let p = v * (n - 1) as f32;
+            let i = (p.floor() as usize).min(n - 2);
+            let t = p - i as f32;
+            out[c] = self.table[i][c] + (self.table[i + 1][c] - self.table[i][c]) * t;
+        }
+        out
+    }
+}
+
+/// [`parse_cube`]'s own result: a real `.cube` file is either a 3D grid
+/// (`LUT_3D_SIZE`) or three independent per-channel 1D curves
+/// (`LUT_1D_SIZE`) — both real, documented, first-class `.cube` formats,
+/// not one a stand-in for the other.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ColorLut {
+    ThreeD(Lut3d),
+    OneD(Lut1d),
+}
+
+impl ColorLut {
+    pub fn sample(&self, rgb: [f32; 3]) -> [f32; 3] {
+        match self {
+            ColorLut::ThreeD(lut) => lut.sample(rgb),
+            ColorLut::OneD(lut) => lut.sample(rgb),
+        }
+    }
+}
+
+/// Parses an Adobe/IRIDAS `.cube` file: either `LUT_3D_SIZE n` (2 or
+/// more) and `n³` grid entries, or `LUT_1D_SIZE n` (2 or more) and `n`
+/// curve entries — both real headers Adobe's own published `.cube` file
+/// specification documents, not one standing in for the other. Either
+/// way: optional `TITLE`, `DOMAIN_MIN`, and `DOMAIN_MAX` lines, and `#`
+/// comments are allowed; a file may declare only one of the two size
+/// headers.
+pub fn parse_cube(text: &str) -> Result<ColorLut, String> {
+    enum Kind {
+        ThreeD(usize),
+        OneD(usize),
+    }
+    let mut kind: Option<Kind> = None;
     let mut domain = ([0.0f32; 3], [1.0f32; 3]);
     let mut table: Vec<[f32; 3]> = Vec::new();
     let triple = |line: &str, what: &str| -> Result<[f32; 3], String> {
@@ -1791,30 +1856,53 @@ pub fn parse_cube(text: &str) -> Result<Lut3d, String> {
             if n < 2 {
                 return Err("LUT_3D_SIZE must be at least 2.".to_string());
             }
-            size = Some(n);
+            kind = Some(Kind::ThreeD(n));
+        } else if let Some(rest) = line.strip_prefix("LUT_1D_SIZE") {
+            let n: usize = rest
+                .trim()
+                .parse()
+                .map_err(|_| "Bad LUT_1D_SIZE in the .cube file.".to_string())?;
+            if n < 2 {
+                return Err("LUT_1D_SIZE must be at least 2.".to_string());
+            }
+            kind = Some(Kind::OneD(n));
         } else if let Some(rest) = line.strip_prefix("DOMAIN_MIN") {
             domain.0 = triple(rest, "DOMAIN_MIN")?;
         } else if let Some(rest) = line.strip_prefix("DOMAIN_MAX") {
             domain.1 = triple(rest, "DOMAIN_MAX")?;
-        } else if line.starts_with("LUT_1D_SIZE") {
-            return Err("1D .cube files are not supported; use a 3D LUT.".to_string());
         } else {
             table.push(triple(line, "table")?);
         }
     }
-    let size = size.ok_or_else(|| "The .cube file has no LUT_3D_SIZE.".to_string())?;
-    if table.len() != size * size * size {
-        return Err(format!(
-            "The .cube file should have {} entries for size {size}, not {}.",
-            size * size * size,
-            table.len()
-        ));
+    match kind.ok_or_else(|| "The .cube file has no LUT_3D_SIZE or LUT_1D_SIZE.".to_string())? {
+        Kind::ThreeD(size) => {
+            if table.len() != size * size * size {
+                return Err(format!(
+                    "The .cube file should have {} entries for size {size}, not {}.",
+                    size * size * size,
+                    table.len()
+                ));
+            }
+            Ok(ColorLut::ThreeD(Lut3d {
+                size,
+                table,
+                domain,
+            }))
+        }
+        Kind::OneD(size) => {
+            if table.len() != size {
+                return Err(format!(
+                    "The .cube file should have {size} entries for size {size}, not {}.",
+                    table.len()
+                ));
+            }
+            Ok(ColorLut::OneD(Lut1d {
+                size,
+                table,
+                domain,
+            }))
+        }
     }
-    Ok(Lut3d {
-        size,
-        table,
-        domain,
-    })
 }
 
 /// View > Proof Setup: the two dichromacies Photoshop's Color Blindness
@@ -21972,11 +22060,12 @@ impl Document {
     }
 
     /// Image > Adjustments > Color Lookup: every selected pixel's colour
-    /// through `lut` ([`Lut3d::sample`]), alpha untouched. Confined to
-    /// the selection and blocked by a locked layer like every adjustment.
-    /// Photoshop's Abstract and Device Link profiles are documented scope
-    /// cuts; `.cube` 3D LUTs are the one format read.
-    pub fn color_lookup(&mut self, id: LayerId, lut: &Lut3d) -> Result<Option<Rect>, String> {
+    /// through `lut` ([`ColorLut::sample`], a real `.cube` file's own
+    /// 3D grid or three independent 1D per-channel curves), alpha
+    /// untouched. Confined to the selection and blocked by a locked
+    /// layer like every adjustment. Photoshop's Abstract and Device
+    /// Link profiles remain a documented scope cut.
+    pub fn color_lookup(&mut self, id: LayerId, lut: &ColorLut) -> Result<Option<Rect>, String> {
         self.adjust_layer_pixels(id, |[r, g, b, a]| {
             let [nr, ng, nb] = lut.sample([to_unit(r), to_unit(g), to_unit(b)]);
             [to_byte(nr), to_byte(ng), to_byte(nb), a]
@@ -62063,7 +62152,10 @@ mod tests {
 
     #[test]
     fn parse_cube_reads_the_grid_and_rejects_bad_files() {
-        let lut = parse_cube(IDENTITY_CUBE).unwrap();
+        let lut = match parse_cube(IDENTITY_CUBE).unwrap() {
+            ColorLut::ThreeD(lut) => lut,
+            ColorLut::OneD(_) => panic!("expected a 3D cube"),
+        };
         assert_eq!(lut.size, 2);
         assert_eq!(lut.table.len(), 8);
         // Red runs fastest: entry 1 is the red corner, entry 2 the green.
@@ -62077,7 +62169,7 @@ mod tests {
         )
         .is_err());
         assert!(parse_cube("LUT_3D_SIZE 1\n0 0 0\n").is_err());
-        assert!(parse_cube("LUT_1D_SIZE 2\n0 0 0\n1 1 1\n").is_err());
+        assert!(parse_cube("LUT_1D_SIZE 1\n0 0 0\n").is_err());
     }
 
     #[test]
@@ -62152,6 +62244,40 @@ mod tests {
         doc.set_locked(id, true).unwrap();
         assert!(doc.color_lookup(id, &lut).is_err());
         assert!(doc.color_lookup(999, &lut).is_err());
+    }
+
+    #[test]
+    fn a_1d_cube_applies_three_independent_per_channel_curves() {
+        // LUT_1D_SIZE 3: three rows, each row's own three numbers are
+        // that *row's* value for the R, G, and B curves independently
+        // (not one shared curve) -- row 0 is each curve's value at input
+        // 0.0, row 1 at input 0.5, row 2 at input 1.0. R's own curve is
+        // [0, 0.25, 1] (squaring, like the 3D grid test's own curve);
+        // G's is the identity [0, 0.5, 1]; B's is R's own curve mirrored,
+        // [1, 0.75, 0]. A single pixel (64, 64, 64) -- the same byte on
+        // every channel -- proves genuine per-channel independence: if
+        // one shared curve were wrongly applied to all three, every
+        // output channel would match; instead each is different.
+        // to_unit(64) = 64/255, p = 2*64/255 = 128/255, landing in the
+        // first segment (i = 0, t = 128/255) for all three curves:
+        //   R: 0 + 0.25*(128/255) = 32/255 -> byte 32 exactly.
+        //   G: 0 + 0.5*(128/255) = 64/255 -> byte 64 exactly (identity).
+        //   B: 1 + (0.75-1)*(128/255) = 1 - 32/255 = 223/255 -> byte 223
+        //     exactly.
+        // All three land on exact byte values (128/255 * any of
+        // 0.25/0.5/0.25 stays an exact multiple of 1/255), no rounding
+        // ambiguity anywhere.
+        let cube = "LUT_1D_SIZE 3\n0 0 1\n0.25 0.5 0.75\n1 1 0\n";
+        let lut = match parse_cube(cube).unwrap() {
+            ColorLut::OneD(lut) => lut,
+            ColorLut::ThreeD(_) => panic!("expected a 1D cube"),
+        };
+        assert_eq!(lut.size, 3);
+        assert_eq!(lut.table.len(), 3);
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("l", &[64, 64, 64, 255], 1, 1).unwrap();
+        doc.color_lookup(id, &ColorLut::OneD(lut)).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [32, 64, 223, 255]);
     }
 
     /// A minimal, real, hand-verifiable two-colour-space OCIO config

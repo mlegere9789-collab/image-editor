@@ -142,7 +142,7 @@ being worked; see `docs/PLAN_TO_100.md` if that changes.)
 - [x] BLACK & WHITE
 - [x] PHOTO FILTER
 - [x] CHANNEL MIXER
-- [x] COLOR LOOKUP (`parse_cube` / `Lut3d::sample` / `color_lookup`: an Adobe `.cube` 3D LUT — `LUT_3D_SIZE`, `TITLE`, `DOMAIN_MIN`/`MAX`, comments, `n³` red-fastest triples — sampled by trilinear interpolation over every selected pixel, alpha untouched; Abstract and Device Link profiles and 1D cubes are documented scope cuts — see README Phase 232)
+- [x] COLOR LOOKUP (`parse_cube` / `ColorLut::sample` / `color_lookup`: a real Adobe `.cube` LUT in either of its own two real, published formats (confirmed directly against Adobe's own `.cube` file specification) — a 3D grid (`LUT_3D_SIZE`, `n³` red-fastest triples, sampled by trilinear interpolation) or three independent per-channel 1D curves (`LUT_1D_SIZE`, `n` triples, each channel its own linearly-interpolated curve) — `TITLE`, `DOMAIN_MIN`/`MAX`, and comments shared by both, applied over every selected pixel, alpha untouched; Abstract and Device Link profiles remain a documented scope cut — see README Phases 232 and 459)
 - [x] INVERT
 - [x] POSTERIZE
 - [x] THRESHOLD
