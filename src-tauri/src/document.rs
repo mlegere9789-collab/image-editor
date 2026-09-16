@@ -411,13 +411,23 @@ pub struct BevelEmbossOptions {
     /// Shadow Mode. Photoshop's own default is Multiply.
     pub shadow_blend_mode: BlendMode,
     /// Gloss Contour: a curve remapping the shading strength before it
-    /// scales the highlight/shadow opacity, this project's own
-    /// three-preset stand-in (the same family [`Self::contour_with`]
-    /// already offers for the standalone Contour style) for Photoshop's
-    /// own dozen-plus Gloss Contour presets. `Linear`, Photoshop's own
-    /// default, is the identity and reproduces the plain shading fade
-    /// exactly.
+    /// scales the highlight/shadow opacity, the same thirteen-preset
+    /// family [`Self::contour_with`] already offers for the standalone
+    /// Contour style. `Linear`, Photoshop's own default, is the identity
+    /// and reproduces the plain shading fade exactly. Ignored when
+    /// `gloss_curve_points` is `Some`.
     pub gloss_contour: ContourPreset,
+    /// An arbitrary hand-drawn Gloss Contour curve, overriding
+    /// `gloss_contour` when present — Photoshop's own real Gloss
+    /// Contour box opens the identical Contour Editor every other Layer
+    /// Style curve uses (confirmed directly against Adobe's own Layer
+    /// Style documentation), not a separate, more limited preset-only
+    /// control. Five output heights at the same fixed normalized input
+    /// positions `[0, 64, 128, 192, 255]` (mapping the shading
+    /// strength's own `0.0..=1.0` domain onto a byte range)
+    /// [`Self::contour_with_curve`] already uses, reusing
+    /// [`curve_lookup`] directly.
+    pub gloss_curve_points: Option<[u8; 5]>,
 }
 
 /// Layer > Layer Style > Stroke's Position.
@@ -25494,12 +25504,22 @@ impl Document {
         let highlight_blend_mode = o.highlight_blend_mode;
         let shadow_blend_mode = o.shadow_blend_mode;
         let gloss_contour = o.gloss_contour;
+        let gloss_lut: Option<[u8; 256]> = o.gloss_curve_points.map(|points| {
+            const XS: [u8; 5] = [0, 64, 128, 192, 255];
+            let nodes: Vec<(u8, u8)> = XS.iter().copied().zip(points).collect();
+            curve_lookup(&nodes).expect("five distinct fixed x positions never error")
+        });
         self.filter_pixels(id, move |src, row, col| {
             let idx = row as usize * w + col as usize;
             let base = idx * CHANNELS;
             let n = relief[idx];
             let px = [src[base], src[base + 1], src[base + 2], src[base + 3]];
-            let strength = gloss_curve(gloss_contour, n.abs());
+            let strength = match gloss_lut {
+                Some(lut) => {
+                    lut[(n.abs() * 255.0).round().clamp(0.0, 255.0) as usize] as f32 / 255.0
+                }
+                None => gloss_curve(gloss_contour, n.abs()),
+            };
             let (colour, t, blend_mode) = if n > 0.0 {
                 (highlight, strength * hl, highlight_blend_mode)
             } else {
@@ -50833,6 +50853,7 @@ mod tests {
             shadow_opacity: 75,
             shadow_blend_mode: BlendMode::Normal,
             gloss_contour: ContourPreset::Linear,
+            gloss_curve_points: None,
         }
     }
 
@@ -52997,6 +53018,56 @@ mod tests {
             &BevelEmbossOptions {
                 altitude: 60.0,
                 gloss_contour: ContourPreset::Ring,
+                ..bevel_options()
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            &doc.layers()[0].pixels[idx(1, 2)..idx(1, 2) + 4],
+            [216, 229, 241, 255]
+        );
+    }
+
+    #[test]
+    fn bevel_emboss_gloss_curve_points_overrides_the_preset_with_a_custom_curve() {
+        // Same fixture, geometry, and two relief samples as the preset
+        // test above (n = 1.0 at default altitude, n = 0.5 at altitude
+        // 60), but gloss_curve_points = [255, 255, 255, 255, 0] -- a
+        // custom curve that is the *inverse* of both presets tested
+        // above at these two exact inputs. n = 1.0 maps to x = 255, an
+        // exact node (XS[4] = 255): lut[255] = points[4] = 0, so
+        // strength = 0/255 = 0.0 -- the same unblended [100, 150, 200]
+        // result the Ring test's own n = 1.0 case reaches, but by a
+        // completely different, independently-set curve, not a
+        // coincidence of Ring's own formula. n = 0.5 maps to x = 128,
+        // also an exact node (XS[2] = 128): lut[128] = points[2] = 255,
+        // so strength = 255/255 = 1.0 -- the same full-strength
+        // [216, 229, 241] the Ring test's own n = 0.5 case reaches. Both
+        // inputs land exactly on curve nodes, so no interpolation
+        // rounding is involved in either assertion. gloss_contour is
+        // left at Photoshop's own Linear default and ignored entirely,
+        // proving gloss_curve_points genuinely overrides it rather than
+        // blending with it.
+        let idx = |x: usize, y: usize| (y * 6 + x) * 4;
+        let (mut doc, id) = inner_glow_fixture();
+        doc.bevel_emboss_with(
+            id,
+            &BevelEmbossOptions {
+                gloss_curve_points: Some([255, 255, 255, 255, 0]),
+                ..bevel_options()
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            &doc.layers()[0].pixels[idx(1, 2)..idx(1, 2) + 4],
+            [100, 150, 200, 255]
+        );
+        let (mut doc, id) = inner_glow_fixture();
+        doc.bevel_emboss_with(
+            id,
+            &BevelEmbossOptions {
+                altitude: 60.0,
+                gloss_curve_points: Some([255, 255, 255, 255, 0]),
                 ..bevel_options()
             },
         )

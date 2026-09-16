@@ -26277,6 +26277,50 @@ existing parity test gained a second case rather than a new function),
 51 frontend (unchanged — the new sliders are plain range inputs, no
 new frontend-testable logic).
 
+## Phase 457 — Bevel & Emboss's Gloss Contour gains the real custom curve editor
+
+Bevel & Emboss's own Gloss Contour offered the same 13 named presets
+Contour does, but no way to draw a custom curve — flagged last phase as
+a real, separate follow-up rather than silently dropped. Researched
+Photoshop's actual real Gloss Contour box first (a genuine web search
+this session, cross-checked against Adobe's own Layer Style
+documentation) and confirmed it opens the identical Contour Editor
+every other Layer Style curve uses — the same Input/Output curve, the
+same New/save-preset flow — not a separate, more limited control. So
+this phase gives it the exact same editor Contour's own standalone
+style already has, rather than a lesser version.
+
+`BevelEmbossOptions` gains `gloss_curve_points: Option<[u8; 5]>`,
+overriding `gloss_contour` when present. `bevel_emboss_with` builds a
+256-entry LUT from it once via `curve_lookup` (the exact same
+five-fixed-point machinery `contour_with_curve` already uses, at the
+same `[0, 64, 128, 192, 255]` input positions), then looks up each
+pixel's own relief magnitude (`n.abs()`, scaled to a byte index)
+instead of calling `gloss_curve`. The dialog's Gloss Contour dropdown
+gained the same "Custom..." option and five curve-point sliders the
+standalone Contour dialog already has.
+
+**Verified two ways.** `bevel_emboss_gloss_curve_points_overrides_the_preset_with_a_custom_curve`
+reuses the existing preset test's own fixture and two relief samples
+(`n = 1.0` at default altitude, `n = 0.5` at altitude 60), with a
+custom curve `[255, 255, 255, 255, 0]` — the exact *inverse* of Ring's
+own strength at both of those inputs. Both inputs (`n = 1.0` → byte
+255, `n = 0.5` → byte 128) land exactly on curve nodes (`XS[4] = 255`,
+`XS[2] = 128`), so no interpolation rounding is involved: the results
+(`[100, 150, 200]` and `[216, 229, 241]`) match Ring's own two results
+from the existing test exactly, proving the custom curve reaches the
+same real strength values through a completely independent,
+hand-verified path, not a coincidence of Ring's own formula.
+`gloss_contour` is left at Photoshop's own Linear default in this test
+and is provably ignored, confirming `gloss_curve_points` genuinely
+overrides it. `cargo fmt --check`, `cargo clippy --all-targets -- -D
+warnings`, `cargo test` (full suite), `npx tsc --noEmit`, and `npm run
+build` all clean.
+
+Tests: 1991 Rust (1990 → 1991, 1984 lib + 7 pipeline — one new
+`#[test]`), 51 frontend (unchanged — the new dropdown option and
+sliders are plain UI, no new frontend-testable logic).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

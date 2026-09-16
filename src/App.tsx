@@ -2202,9 +2202,11 @@ export default function App() {
   const [bevelShadowOpacity, setBevelShadowOpacity] = useState(50);
   const [bevelShadowBlendMode, setBevelShadowBlendMode] =
     useState<BlendMode>("multiply");
-  const [bevelGlossContour, setBevelGlossContour] = useState<
-    Exclude<ContourPreset, "custom">
-  >("linear");
+  const [bevelGlossContour, setBevelGlossContour] =
+    useState<ContourPreset>("linear");
+  const [bevelGlossCurve, setBevelGlossCurve] = useState<
+    [number, number, number, number, number]
+  >([0, 64, 128, 192, 255]);
   const [showContourDialog, setShowContourDialog] = useState(false);
   const [contourSize, setContourSize] = useState(5);
   const [contourLightDirection, setContourLightDirection] = useState(7);
@@ -6653,7 +6655,10 @@ export default function App() {
         shadow: [sr, sg, sb],
         shadowOpacity: bevelShadowOpacity,
         shadowBlendMode: bevelShadowBlendMode,
-        glossContour: bevelGlossContour,
+        glossContour:
+          bevelGlossContour === "custom" ? "linear" : bevelGlossContour,
+        glossCurvePoints:
+          bevelGlossContour === "custom" ? bevelGlossCurve : null,
       },
     });
     setShowBevelEmbossDialog(false);
@@ -6675,6 +6680,7 @@ export default function App() {
     bevelShadowOpacity,
     bevelShadowBlendMode,
     bevelGlossContour,
+    bevelGlossCurve,
   ]);
 
   const applyContour = useCallback(async () => {
@@ -27556,9 +27562,7 @@ export default function App() {
               <select
                 value={bevelGlossContour}
                 onChange={(event) =>
-                  setBevelGlossContour(
-                    event.target.value as Exclude<ContourPreset, "custom">,
-                  )
+                  setBevelGlossContour(event.target.value as ContourPreset)
                 }
               >
                 <option value="linear">Linear</option>
@@ -27576,8 +27580,38 @@ export default function App() {
                 </option>
                 <option value="halfRound">Half Round</option>
                 <option value="cylinder">Cylinder</option>
+                <option value="custom">Custom...</option>
               </select>
             </label>
+            {bevelGlossContour === "custom" && (
+              <>
+                {(["0%", "25%", "50%", "75%", "100%"] as const).map(
+                  (label, i) => (
+                    <label className="control" key={label}>
+                      <span className="control__label">
+                        Gloss Curve Input {label}
+                        <span className="control__value">
+                          {bevelGlossCurve[i]}
+                        </span>
+                      </span>
+                      <input
+                        type="range"
+                        min={0}
+                        max={255}
+                        value={bevelGlossCurve[i]}
+                        onChange={(event) =>
+                          setBevelGlossCurve((points) => {
+                            const next = [...points] as typeof points;
+                            next[i] = Number(event.target.value);
+                            return next;
+                          })
+                        }
+                      />
+                    </label>
+                  ),
+                )}
+              </>
+            )}
             <label className="control control--row">
               <span className="control__label">Highlight</span>
               <input
