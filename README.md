@@ -25800,6 +25800,52 @@ changed.
 
 Tests: 1974 Rust (unchanged), 46 frontend (unchanged).
 
+## Phase 447 — Layer Style > Contour's Step preset
+
+Layer Style > Contour (and Bevel & Emboss's own Gloss Contour, which
+shares the same curve function) offered three of Photoshop's dozen-plus
+Contour panel presets — `Linear`, `Ring`, and `RingDouble` — with the
+rest a documented scope cut. This phase adds a fourth, `Step`: a hard
+cutoff standing in for Photoshop's own "Stair Step"-family presets,
+which jump between two output levels rather than ramping between them
+the way `Ring`/`RingDouble` do.
+
+`ContourPreset` gains a `Step` variant. `gloss_curve` (Bevel & Emboss's
+own normalized `0.0..=1.0` domain) maps it to `0.0` below the midpoint
+and `1.0` at or above it — `gloss_curve(Step, x) = if x >= 0.5 { 1.0 }
+else { 0.0 }`. `contour_with`'s own raw-height `ring` closure gets the
+same shape scaled to the raw domain: `if 2 * h >= radius { radius }
+else { 0 }`. Both are one match arm each, pure integer/float
+comparisons — no new transcendental functions, no floating-point
+rounding to hand-verify.
+
+**Verified two ways.** `gloss_curve_ring_and_ring_double_peak_and_zero_where_expected`
+(an existing test, gaining new cases rather than a new `#[test]`, so
+this doesn't move the count on its own) gained five new assertions at
+`x = 0.0, 0.49, 0.5, 0.75, 1.0`, hand-checked directly from the `>= 0.5`
+cutoff. A new `contour_with_step_jumps_instead_of_ramping` test reuses
+Inner Glow's own fixture (a 6×6 layer, opaque 4×4 block at rows/columns
+1-4) at size 3 (radius 3, midpoint 1.5), direction 2 (`dx=1, dy=0`),
+pixel (2, 2): `toward = height(2, 3) = 2` (`2*2=4 >= 3`, so
+`step(2) = 3`), `away = height(2, 1) = 1` (`2*1=2 < 3`, so
+`step(1) = 0`), `relief = step(away) − step(toward) = 0 − 3 = −3`,
+`shade = −3.0` at strength 100, giving `(97, 147, 197)` from the
+fixture's own `(100, 150, 200)` base — a real, differently-signed jump
+from the existing Ring test's own `(102, 152, 202)` at this same pixel
+and direction, so the new preset is provably taking a different code
+path rather than coincidentally matching an existing one.
+
+Both the standalone Contour dialog and Bevel & Emboss's own Gloss
+Contour dropdown gained a "Step" option; `Document::contour`'s own
+Ring-only default is unchanged. `cargo fmt --check`,
+`cargo clippy --all-targets -- -D warnings`, `cargo test` (full suite),
+and `npm run build` all clean.
+
+Tests: 1975 Rust (1974 → 1975, 1968 lib + 7 pipeline — only one new
+`#[test]`, since the `gloss_curve` cases landed in an existing test
+function), 46 frontend (unchanged — this phase is backend-plus-dropdown
+only, no new frontend-testable logic).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

@@ -2188,14 +2188,14 @@ export default function App() {
   const [bevelShadowBlendMode, setBevelShadowBlendMode] =
     useState<BlendMode>("multiply");
   const [bevelGlossContour, setBevelGlossContour] = useState<
-    "ring" | "linear" | "ringDouble"
+    "ring" | "linear" | "ringDouble" | "step"
   >("linear");
   const [showContourDialog, setShowContourDialog] = useState(false);
   const [contourSize, setContourSize] = useState(5);
   const [contourLightDirection, setContourLightDirection] = useState(7);
   const [contourStrength, setContourStrength] = useState(50);
   const [contourPreset, setContourPreset] = useState<
-    "ring" | "linear" | "ringDouble"
+    "ring" | "linear" | "ringDouble" | "step"
   >("ring");
   const [showTextureDialog, setShowTextureDialog] = useState(false);
   const [textureSize, setTextureSize] = useState(5);
@@ -27470,13 +27470,18 @@ export default function App() {
                 value={bevelGlossContour}
                 onChange={(event) =>
                   setBevelGlossContour(
-                    event.target.value as "ring" | "linear" | "ringDouble",
+                    event.target.value as
+                      | "ring"
+                      | "linear"
+                      | "ringDouble"
+                      | "step",
                   )
                 }
               >
                 <option value="linear">Linear</option>
                 <option value="ring">Ring</option>
                 <option value="ringDouble">Ring - Double</option>
+                <option value="step">Step</option>
               </select>
             </label>
             <label className="control control--row">
@@ -27587,13 +27592,18 @@ export default function App() {
                 value={contourPreset}
                 onChange={(event) =>
                   setContourPreset(
-                    event.target.value as "ring" | "linear" | "ringDouble",
+                    event.target.value as
+                      | "ring"
+                      | "linear"
+                      | "ringDouble"
+                      | "step",
                   )
                 }
               >
                 <option value="linear">Linear</option>
                 <option value="ring">Ring</option>
                 <option value="ringDouble">Ring - Double</option>
+                <option value="step">Step</option>
               </select>
             </label>
             <label className="control">

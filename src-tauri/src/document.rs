@@ -4202,6 +4202,7 @@ pub enum ContourPreset {
     Ring,
     Linear,
     RingDouble,
+    Step,
 }
 
 /// A ruler guide: a horizontal line at `position` pixels down from the
@@ -25590,6 +25591,9 @@ impl Document {
     /// `RingDouble` is `Ring`'s own triangular remap at twice the spatial
     /// frequency across the same `size`, producing two bright/dark rings
     /// where `Ring` produces one — Photoshop's own "Ring - Double" preset.
+    /// `Step` is a hard cutoff — `0` for any height below half of `size`,
+    /// `size` itself at or above it — standing in for Photoshop's own
+    /// "Stair Step"-family presets, which jump rather than ramp.
     pub fn contour_with(
         &mut self,
         id: LayerId,
@@ -25630,6 +25634,13 @@ impl Document {
             ContourPreset::RingDouble => {
                 let half = (radius / 2).max(1);
                 half - (2 * (h % half) - half).abs()
+            }
+            ContourPreset::Step => {
+                if 2 * h >= radius {
+                    radius
+                } else {
+                    0
+                }
             }
         };
         self.filter_pixels(id, move |src, row, col| {
@@ -31631,7 +31642,10 @@ fn tone_mix(a: [u8; 3], b: [u8; 3], t: f32) -> [u8; 3] {
 /// both ends, the bright ring right at a bevel's own mid-slope Gloss
 /// Contour's "Ring" preset is named for. `RingDouble` folds the same
 /// triangle into each half of the domain, peaking at `x = 0.25` and `x
-/// = 0.75`.
+/// = 0.75`. `Step` is Photoshop's own hard-edged "Stair Step"-family
+/// look, standing in for that group of presets: `0.0` below the
+/// midpoint, `1.0` at or above it — a single instant cutoff rather than
+/// a ramp.
 fn gloss_curve(preset: ContourPreset, x: f32) -> f32 {
     match preset {
         ContourPreset::Linear => x,
@@ -31639,6 +31653,13 @@ fn gloss_curve(preset: ContourPreset, x: f32) -> f32 {
         ContourPreset::RingDouble => {
             let h = if x < 0.5 { x } else { x - 0.5 };
             1.0 - (4.0 * h - 1.0).abs()
+        }
+        ContourPreset::Step => {
+            if x >= 0.5 {
+                1.0
+            } else {
+                0.0
+            }
         }
     }
 }
@@ -52554,6 +52575,13 @@ mod tests {
         assert_eq!(gloss_curve(ContourPreset::RingDouble, 1.0), 0.0);
         assert_eq!(gloss_curve(ContourPreset::RingDouble, 0.25), 1.0);
         assert_eq!(gloss_curve(ContourPreset::RingDouble, 0.75), 1.0);
+        // Step: zero strictly below the midpoint, one at or above it --
+        // including the boundary itself, which lands on the "at" side.
+        assert_eq!(gloss_curve(ContourPreset::Step, 0.0), 0.0);
+        assert_eq!(gloss_curve(ContourPreset::Step, 0.49), 0.0);
+        assert_eq!(gloss_curve(ContourPreset::Step, 0.5), 1.0);
+        assert_eq!(gloss_curve(ContourPreset::Step, 0.75), 1.0);
+        assert_eq!(gloss_curve(ContourPreset::Step, 1.0), 1.0);
     }
 
     #[test]
@@ -53359,6 +53387,27 @@ mod tests {
         let idx = |x: usize, y: usize| (y * width as usize + x) * 4;
         let p = &doc.layers()[0].pixels;
         assert_eq!(&p[idx(9, 1)..idx(9, 1) + 4], [96, 146, 196, 255]);
+    }
+
+    #[test]
+    fn contour_with_step_jumps_instead_of_ramping() {
+        // Inner Glow's own fixture again, size 3 this time (radius 3,
+        // midpoint 1.5) so the two sampled heights land on opposite
+        // sides of Step's own cutoff. Direction 2 (dx=1, dy=0), pixel
+        // (2, 2): toward = height(2, 3) = 2 (two Chebyshev steps from
+        // the block's own right/top edge), 2*2=4 >= 3, so step(2) = 3.
+        // away = height(2, 1) = 1 (one step in from the block's own left
+        // edge), 2*1=2 < 3, so step(1) = 0. relief = step(away) -
+        // step(toward) = 0 - 3 = -3, shade = -3.0 at strength 100,
+        // giving (97, 147, 197) from the fixture's own (100, 150, 200)
+        // -- a real jump, not the Ring test's own smaller, differently
+        // signed (102, 152, 202) at this same pixel and direction.
+        let idx = |x: usize, y: usize| (y * 6 + x) * 4;
+        let (mut doc, id) = inner_glow_fixture();
+        doc.contour_with(id, 3, 2, 100, ContourPreset::Step)
+            .unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(2, 2)..idx(2, 2) + 4], [97, 147, 197, 255]);
     }
 
     #[test]
