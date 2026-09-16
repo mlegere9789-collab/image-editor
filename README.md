@@ -25429,6 +25429,47 @@ build`/`npm test` all clean.
 Tests: 1972 Rust (a third case added to the same existing test, count
 unchanged), 46 frontend (unchanged).
 
+## Phase 438 — Adjustment Layer's Vibrance
+
+A fourth kind off Adjustment Layer's own documented scope cut, same
+template as Phases 435-437: Vibrance is also a pure per-pixel function
+(a saturation-protecting HSL boost followed by a uniform saturation
+slider, no external state), so it slots into `Adjustment`/
+`apply_adjustment` the same way.
+
+`document.rs`'s `Adjustment` enum gains a `Vibrance { vibrance: i32,
+saturation: i32 }` variant; `apply_adjustment` gains a match arm
+carrying `vibrance`'s own exact formula — saturation scaled toward full
+by `1 - current_saturation` times the vibrance slider, then a uniform
+saturation slider on top, both through `rgb_to_hsl`/`hsl_to_rgb`. The
+destructive `vibrance` command is now a thin call onto
+`Adjustment::Vibrance` through `adjust_with`, the same refactor
+`color_balance`, `exposure` and `photo_filter` already went through. No
+`lib.rs` change needed.
+
+The frontend's `Adjustment` type gains the matching `vibrance` variant;
+the Adjustment Layer dialog gained a Vibrance option reusing the
+standalone Vibrance dialog's own `vibrance`/`vibranceSaturation` state
+rather than duplicating it.
+
+Extended `adjustment_layers_match_their_destructive_commands`
+(compiler-enforced exhaustive over `Adjustment` again) with an eighth
+case: Vibrance +100/Saturation 0 on the suite's own base pixel (200,
+100, 50 — hue 20°, saturation 0.6 exactly, lightness 125/255 exactly,
+all confirmed by hand against `rgb_to_hsl`'s own formula) drives
+saturation from 0.6 to exactly 1.0 regardless of the starting value
+(`0.6 + 1.0*(1 - 0.6) = 1.0`); converting hue 20°/saturation 1.0/
+lightness 125/255 back through `hsl_to_rgb`'s own formula by hand
+(`c = 1 - |2l - 1| = 50/51`, `x = c/3 = 50/153`, `m = l - c/2 = 0`
+exactly) lands at `(250, 83, 0)` — `50/51 * 255 = 250` exactly,
+`50/153 * 255 = 250/3 = 83.33...` rounds to 83. All 11 of `vibrance`'s
+own pre-existing tests pass unmodified against the refactored
+delegation. `cargo fmt`/`clippy --all-targets -D warnings`/`test` and
+`npx tsc --noEmit`/`npm run build`/`npm test` all clean.
+
+Tests: 1972 Rust (a fourth case added to the same existing test, count
+unchanged), 46 frontend (unchanged).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

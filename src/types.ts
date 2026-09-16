@@ -225,7 +225,8 @@ export type Adjustment =
       highlights: [number, number, number];
     }
   | { kind: "exposure"; exposure: number; offset: number; gamma: number }
-  | { kind: "photoFilter"; color: [number, number, number]; density: number };
+  | { kind: "photoFilter"; color: [number, number, number]; density: number }
+  | { kind: "vibrance"; vibrance: number; saturation: number };
 
 /** Mirrors `NeuralFilterKind` in src-tauri/src/document.rs (serde
  * camelCase, fieldless variants so each serializes as a bare string) — a

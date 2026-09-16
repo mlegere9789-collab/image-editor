@@ -811,6 +811,10 @@ pub enum Adjustment {
         color: [u8; 3],
         density: u8,
     },
+    Vibrance {
+        vibrance: i32,
+        saturation: i32,
+    },
 }
 
 impl Adjustment {
@@ -3925,7 +3929,8 @@ pub enum Fill {
 /// [`Document::exposure`]'s own stop-multiply/offset/gamma chain over
 /// the pixel's own `0.0..=1.0` value; Photo Filter
 /// [`Document::photo_filter`]'s own per-channel lerp toward `color` by
-/// `density`.
+/// `density`; Vibrance [`Document::vibrance`]'s own saturation-protecting
+/// boost followed by a uniform saturation slider.
 pub fn apply_adjustment(adjustment: Adjustment, [r, g, b]: [u8; 3]) -> [u8; 3] {
     match adjustment {
         Adjustment::Invert => [255 - r, 255 - g, 255 - b],
@@ -4003,6 +4008,18 @@ pub fn apply_adjustment(adjustment: Adjustment, [r, g, b]: [u8; 3]) -> [u8; 3] {
             let t = density.min(100) as f32 / 100.0;
             let blend = |c: u8, f: u8| to_byte(lerp(to_unit(c), to_unit(f), t));
             [blend(r, color[0]), blend(g, color[1]), blend(b, color[2])]
+        }
+        Adjustment::Vibrance {
+            vibrance,
+            saturation,
+        } => {
+            let vibrance_factor = vibrance.clamp(-100, 100) as f32 / 100.0;
+            let sat_factor = saturation.clamp(-100, 100) as f32 / 100.0;
+            let (h, s, l) = rgb_to_hsl(r, g, b);
+            let s = (s + vibrance_factor * (1.0 - s)).clamp(0.0, 1.0);
+            let s = (s * (1.0 + sat_factor)).clamp(0.0, 1.0);
+            let (r, g, b) = hsl_to_rgb(h, s, l);
+            [r, g, b]
         }
     }
 }
@@ -25930,22 +25947,23 @@ impl Document {
     /// near-grey pixel gets the full effect; `saturation` then applies
     /// uniformly on top, the same linear scale `hue_saturation` uses.
     /// Both `-100..=100`, matching Photoshop's own dialog range, and
-    /// clamped rather than erroring on an out-of-range value.
+    /// clamped rather than erroring on an out-of-range value. Now a thin
+    /// call onto [`Adjustment::Vibrance`] through [`Self::adjust_with`]
+    /// — the same formula above, byte for byte, is also what a live
+    /// Adjustment Layer of this kind now applies (`apply_adjustment`).
     pub fn vibrance(
         &mut self,
         id: LayerId,
         vibrance: i32,
         saturation: i32,
     ) -> Result<Option<Rect>, String> {
-        let vibrance_factor = vibrance.clamp(-100, 100) as f32 / 100.0;
-        let sat_factor = saturation.clamp(-100, 100) as f32 / 100.0;
-        self.adjust_layer_pixels(id, move |[r, g, b, a]| {
-            let (h, s, l) = rgb_to_hsl(r, g, b);
-            let s = (s + vibrance_factor * (1.0 - s)).clamp(0.0, 1.0);
-            let s = (s * (1.0 + sat_factor)).clamp(0.0, 1.0);
-            let (r, g, b) = hsl_to_rgb(h, s, l);
-            [r, g, b, a]
-        })
+        self.adjust_with(
+            id,
+            Adjustment::Vibrance {
+                vibrance,
+                saturation,
+            },
+        )
     }
 
     /// Image > Adjustments > Photo Filter: tints a layer toward `color` by
@@ -44726,7 +44744,13 @@ mod tests {
         // channel's own 0..=1 value 40% of the way to 1.0:
         // 200/255*0.6 + 0.4 = 222/255 exactly -> 222; 100/255*0.6 + 0.4
         // = 162/255 exactly -> 162; 50/255*0.6 + 0.4 = 132/255 exactly
-        // -> 132.
+        // -> 132. Vibrance +100/Saturation 0 drives the base pixel's own
+        // saturation from 0.6 to exactly 1.0 (0.6 + 1.0*(1-0.6) = 1.0)
+        // regardless of the starting value; converting hue 20°,
+        // saturation 1.0, lightness 125/255 back with hsl_to_rgb (c =
+        // 1 - |2*(125/255) - 1| = 50/51, x = c/3 = 50/153, m = l - c/2 =
+        // 0 exactly) gives r = 50/51*255 = 250 exactly, g =
+        // 50/153*255 = 250/3 = 83.33... -> 83, b = 0.
         for (adjustment, expected) in [
             (
                 Adjustment::BrightnessContrast {
@@ -44768,6 +44792,13 @@ mod tests {
                 },
                 [222, 162, 132],
             ),
+            (
+                Adjustment::Vibrance {
+                    vibrance: 100,
+                    saturation: 0,
+                },
+                [250, 83, 0],
+            ),
         ] {
             let (mut doc, base) = base_pixel();
             doc.add_adjustment_layer("adj", adjustment).unwrap();
@@ -44805,6 +44836,10 @@ mod tests {
                 Adjustment::PhotoFilter { color, density } => {
                     baked.photo_filter(baked_id, color, density).unwrap()
                 }
+                Adjustment::Vibrance {
+                    vibrance,
+                    saturation,
+                } => baked.vibrance(baked_id, vibrance, saturation).unwrap(),
             };
             assert_eq!(&live[..3], expected, "{adjustment:?}");
             assert_eq!(live, composite_at(&baked, 0), "{adjustment:?}");

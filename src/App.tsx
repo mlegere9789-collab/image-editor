@@ -645,6 +645,8 @@ function adjustmentKindLabel(kind: Adjustment["kind"]): string {
       return "Exposure";
     case "photoFilter":
       return "Photo Filter";
+    case "vibrance":
+      return "Vibrance";
     default:
       return "Invert";
   }
@@ -6761,6 +6763,12 @@ export default function App() {
           color: hexToRgb(photoFilterColor),
           density: photoFilterDensity,
         };
+      case "vibrance":
+        return {
+          kind: "vibrance",
+          vibrance,
+          saturation: vibranceSaturation,
+        };
       default:
         return { kind: "invert" };
     }
@@ -6781,6 +6789,8 @@ export default function App() {
     exposureGamma,
     photoFilterColor,
     photoFilterDensity,
+    vibrance,
+    vibranceSaturation,
   ]);
 
   const addAdjustmentLayer = useCallback(async () => {
@@ -27757,8 +27767,45 @@ export default function App() {
                 <option value="colorBalance">Color Balance</option>
                 <option value="exposure">Exposure</option>
                 <option value="photoFilter">Photo Filter</option>
+                <option value="vibrance">Vibrance</option>
               </select>
             </label>
+            {adjustmentKind === "vibrance" && (
+              <>
+                <label className="control">
+                  <span className="control__label">
+                    Vibrance
+                    <span className="control__value">{vibrance}</span>
+                  </span>
+                  <input
+                    type="range"
+                    min={-100}
+                    max={100}
+                    value={vibrance}
+                    onChange={(event) =>
+                      setVibrance(Number(event.target.value))
+                    }
+                  />
+                </label>
+                <label className="control">
+                  <span className="control__label">
+                    Saturation
+                    <span className="control__value">
+                      {vibranceSaturation}
+                    </span>
+                  </span>
+                  <input
+                    type="range"
+                    min={-100}
+                    max={100}
+                    value={vibranceSaturation}
+                    onChange={(event) =>
+                      setVibranceSaturation(Number(event.target.value))
+                    }
+                  />
+                </label>
+              </>
+            )}
             {adjustmentKind === "photoFilter" && (
               <>
                 <label className="control control--row">
